@@ -1,0 +1,40 @@
+name: Update report location fields
+on:
+  push:
+    branches: [main]
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update index.html
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+          old='<div id="report" class="hidden"><div class="row"><span>Powiat</span><b id="rc"></b></div><div class="row"><span>Gmina</span><b id="rg"></b></div><div class="row"><span>Obręb</span><b id="rr"></b></div><div class="row"><span>Numer</span><b id="rn"></b></div>'
+          new='<div id="report" class="hidden"><div class="row"><span>Identyfikator działki</span><b id="ri"></b></div><div class="row"><span>Województwo</span><b id="rv"></b></div><div class="row"><span>Powiat</span><b id="rc"></b></div><div class="row"><span>Gmina</span><b id="rg"></b></div><div class="row"><span>Obręb</span><b id="rr"></b></div><div class="row"><span>Numer</span><b id="rn"></b></div>'
+          if old not in s:
+              raise SystemExit('Nie znaleziono sekcji raportu do zmiany')
+          s=s.replace(old,new,1)
+          old2='empty.classList.add("hidden");report.classList.remove("hidden");rc.textContent=c?.name||f[3]||"—";rg.textContent=g?.name||f[4]||"—";'
+          new2='empty.classList.add("hidden");report.classList.remove("hidden");ri.textContent=id;rv.textContent=V[(c?.code||id.slice(0,2)).slice(0,2)]||"—";rc.textContent=c?.name||f[3]||"—";rg.textContent=g?.name||f[4]||"—";'
+          if old2 not in s:
+              raise SystemExit('Nie znaleziono miejsca renderowania raportu do zmiany')
+          s=s.replace(old2,new2,1)
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Commit and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Dodaj identyfikator i województwo do raportu" || exit 0
+          git rm .github/workflows/update-report-location.yml
+          git add -u
+          git commit --amend --no-edit
+          git push
