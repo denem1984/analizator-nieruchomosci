@@ -1,0 +1,61 @@
+DATE=2026-09-03T14:04:03Z
+===== GUGIK CAPABILITIES =====
+curl_exit=0
+HTTP/1.1 200 OK Content-Type: text/xml; charset=UTF-8 Content-Length: 13951 
+size=13951
+layers:
+NAME: WMS
+TITLE: Grupy rejestrowe
+TITLE: Grupy rejestrowe
+NAME: dzialki_stats
+TITLE: Statystyki działek wg grup rejestrowych i JPT
+NAME: default
+TITLE: default
+NAME: dzialki_stats_pan_polygon
+TITLE: Państwo - statystyki
+NAME: default
+TITLE: default
+NAME: dzialki_stats_woj_polygon
+TITLE: Województwa - statystyki
+NAME: dzialki_stats_pow_polygon
+TITLE: Powiaty - statystyki
+NAME: dzialki
+TITLE: Działki wg grup rejestrowych
+NAME: default
+TITLE: default
+NAME: dzialki_prev
+TITLE: Działki - widok poglądowy
+NAME: default
+TITLE: default
+NAME: dzialki_polygon
+TITLE: Działki
+===== GUGIK GETMAP dzialki =====
+curl_exit=0
+HTTP/1.1 200 OK Content-Type: image/png 
+size=102334
+file=PNG image data, 1200 x 800, 8-bit/color RGBA, non-interlaced
+===== EPODGIK CAPABILITIES =====
+curl_exit=0
+HTTP/2 200  content-type: text/xml; charset=UTF-8 
+size=11614
+layers:
+NAME: WMS
+TITLE: Dane ewidencji gruntów i budynków
+TITLE: Dane ewidencji gruntów i budynków
+NAME: grupy
+TITLE: grupy
+NAME: default
+TITLE: default
+NAME: grupy_src
+TITLE: Grupy rejestrowe
+NAME: default
+TITLE: default
+NAME: grupy_uzup
+TITLE: Grupy rejestrowe
+NAME: default
+TITLE: default
+===== EPODGIK GETMAP dzialki =====
+curl_exit=0
+HTTP/2 200  content-type: image/png 
+size=59535
+file=PNG image data, 600 x 300, 8-bit/color RGBA, non-interlaced
