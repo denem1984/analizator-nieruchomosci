@@ -1,0 +1,27 @@
+name: Ownership PNG probe
+
+on:
+  push:
+    paths:
+      - '.github/workflows/ownership-png-probe.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe ownership images
+        shell: bash
+        run: |
+          set +e
+          echo '--- GUGIK dzialki Warsaw ---'
+          curl -L --max-time 90 -sS -D /tmp/g.h -o /tmp/g.png 'https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=dzialki&STYLES=&SRS=EPSG:4326&BBOX=20.90,52.05,21.20,52.35&WIDTH=1000&HEIGHT=700&FORMAT=image/png&TRANSPARENT=TRUE'
+          grep -Ei '^(HTTP/|content-type:|content-length:)' /tmp/g.h || true
+          file /tmp/g.png
+          identify /tmp/g.png || true
+          convert /tmp/g.png -format '%c' histogram:info:- 2>/dev/null | sort -nr | head -20 || true
+          echo '--- EPODGIK grupy Warsaw ---'
+          curl -L --max-time 90 -sS -D /tmp/e.h -o /tmp/e.png 'https://wms16.epodgik.pl/cgi-bin/Wlasnosc?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=grupy&STYLES=&SRS=EPSG:4326&BBOX=20.90,52.05,21.20,52.35&WIDTH=1000&HEIGHT=700&FORMAT=image/png&TRANSPARENT=TRUE'
+          grep -Ei '^(HTTP/|content-type:|content-length:)' /tmp/e.h || true
+          file /tmp/e.png
+          identify /tmp/e.png || true
+          convert /tmp/e.png -format '%c' histogram:info:- 2>/dev/null | sort -nr | head -20 || true
