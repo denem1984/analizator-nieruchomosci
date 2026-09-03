@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - '.github/workflows/ownership-service-diagnostic.yml'
+      - 'diagnostic-trigger.txt'
 
 jobs:
   test:
@@ -31,9 +32,8 @@ jobs:
             echo "curl_exit=$rc" >> ownership-diagnostic.txt
             echo "size=$(wc -c < "$out" 2>/dev/null)" >> ownership-diagnostic.txt
             echo "content_type=$(file -b "$out" 2>/dev/null)" >> ownership-diagnostic.txt
-            if [ -s "$out" ]; then
-              echo "layers:" >> ownership-diagnostic.txt
-              python3 - "$out" <<'PY' >> ownership-diagnostic.txt
+            echo "layers:" >> ownership-diagnostic.txt
+            python3 - "$out" <<'PY' >> ownership-diagnostic.txt
 import sys, xml.etree.ElementTree as ET
 p=sys.argv[1]
 try:
@@ -45,7 +45,6 @@ try:
             if n: print(f"{n} | {t or ''}")
 except Exception as ex: print('XML_PARSE_ERROR',repr(ex))
 PY
-            fi
           }
 
           test_map() {
@@ -58,7 +57,7 @@ PY
             rc=$?
             echo "===== $name GETMAP =====" >> ownership-diagnostic.txt
             echo "curl_exit=$rc" >> ownership-diagnostic.txt
-            echo "$(sed -n '1,12p' "/tmp/${name}.headers" 2>/dev/null | tr '\n' ' ')" >> ownership-diagnostic.txt
+            echo "$(grep -Ei '^(HTTP/|content-type:|content-length:)' "/tmp/${name}.headers" 2>/dev/null | tr '\n' ' ')" >> ownership-diagnostic.txt
             echo "size=$(wc -c < "$out" 2>/dev/null)" >> ownership-diagnostic.txt
             echo "file=$(file -b "$out" 2>/dev/null)" >> ownership-diagnostic.txt
           }
