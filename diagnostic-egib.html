@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="pl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Diagnostyka EGiB – powierzchnia ewidencyjna</title><style>body{font-family:Arial,sans-serif;max-width:1000px;margin:30px auto;padding:0 18px;background:#f5f6f8;color:#222}h1{font-size:24px}.box{background:#fff;border:1px solid #ddd;border-radius:10px;padding:18px;margin:14px 0}button{padding:10px 16px;border:0;border-radius:7px;background:#166534;color:#fff;font-weight:700;cursor:pointer}pre{white-space:pre-wrap;word-break:break-word;background:#111;color:#eee;padding:14px;border-radius:8px;max-height:500px;overflow:auto}.ok{color:#166534;font-weight:700}.err{color:#b91c1c;font-weight:700}.value{font-size:26px;font-weight:700;margin:12px 0}</style></head>
+<body>
+<h1>Diagnostyka EGiB – powierzchnia ewidencyjna</h1>
+<div class="box"><p><b>Testowa działka:</b> 281603_5.0017.1/48 (Łupki, gmina Pisz)</p><p>Źródło: Krajowa Integracja Ewidencji Gruntów (KIEG), WMS, warstwa <b>dzialki</b>.</p><p>Test nie wykonuje żadnych obliczeń powierzchni. Szuka wyłącznie pola <b>POLE_EWIDENCYJNE</b> zwracanego przez usługę.</p><button id="run">Uruchom test</button></div>
+<div class="box"><div id="status">Test nie został jeszcze uruchomiony.</div><div id="value"></div><pre id="raw"></pre></div>
+<script>
+const WMS='https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow';
+// BBOX i punkt są w EPSG:2180. Punkt zapytania leży wewnątrz geometrii działki 1/48.
+const p={minx:687450,miny:645260,maxx:687570,maxy:645325,x:687505,y:645292};
+function xmlValue(text,name){let m=text.match(new RegExp('<'+name+'[^>]*>([^<]*)<\\/'+name+'>','i'));return m?m[1].trim():''}
+run.onclick=async()=>{status.className='';status.textContent='Pobieram GetFeatureInfo z KIEG…';value.textContent='';raw.textContent='';run.disabled=true;try{let u=new URL(WMS);let q={SERVICE:'WMS',VERSION:'1.1.1',REQUEST:'GetFeatureInfo',SRS:'EPSG:2180',BBOX:`${p.minx},${p.miny},${p.maxx},${p.maxy}`,WIDTH:'1200',HEIGHT:'650',X:String(Math.round((p.x-p.minx)/(p.maxx-p.minx)*1200)),Y:String(Math.round((p.maxy-p.y)/(p.maxy-p.miny)*650)),LAYERS:'dzialki',QUERY_LAYERS:'dzialki',INFO_FORMAT:'text/xml',FORMAT:'image/png',TRANSPARENT:'TRUE'};Object.entries(q).forEach(([k,v])=>u.searchParams.set(k,v));let r=await fetch(u);let text=await r.text();raw.textContent='HTTP '+r.status+'\nURL:\n'+u+'\n\nODPOWIEDŹ:\n'+text;if(!r.ok)throw Error('HTTP '+r.status);let area=xmlValue(text,'POLE_EWIDENCYJNE');let id=xmlValue(text,'ID_DZIALKI');if(!area)throw Error('Brak POLE_EWIDENCYJNE w odpowiedzi');status.className='ok';status.textContent='OK – KIEG zwrócił POLE_EWIDENCYJNE.';value.innerHTML='<div>POLE_EWIDENCYJNE: <span class="value">'+area+' ha</span></div><div>ID działki: '+(id||'brak')+'</div>'}catch(e){status.className='err';status.textContent='BŁĄD: '+(e.message||e);console.error(e)}finally{run.disabled=false}};
+</script></body></html>
