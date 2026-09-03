@@ -1,0 +1,66 @@
+name: Ownership WMS diagnostic
+
+on:
+  push:
+    paths:
+      - '.github/workflows/ownership-service-diagnostic.yml'
+      - 'diagnostic-trigger.txt'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test ownership services
+        shell: bash
+        run: |
+          set +e
+          : > ownership-diagnostic.txt
+          echo "DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ownership-diagnostic.txt
+          echo >> ownership-diagnostic.txt
+
+          test_url() {
+            name="$1"
+            url="$2"
+            echo "===== $name =====" >> ownership-diagnostic.txt
+            echo "$url" >> ownership-diagnostic.txt
+            curl -L --max-time 45 -sS -D /tmp/headers -o /tmp/body "$url"
+            rc=$?
+            echo "curl_exit=$rc" >> ownership-diagnostic.txt
+            echo "--- headers ---" >> ownership-diagnostic.txt
+            sed -n '1,20p' /tmp/headers >> ownership-diagnostic.txt 2>/dev/null
+            echo "--- body ---" >> ownership-diagnostic.txt
+            head -c 5000 /tmp/body >> ownership-diagnostic.txt 2>/dev/null
+            echo >> ownership-diagnostic.txt
+            echo "--- file ---" >> ownership-diagnostic.txt
+            file /tmp/body >> ownership-diagnostic.txt 2>/dev/null
+            echo >> ownership-diagnostic.txt
+          }
+
+          test_url "GUGIK_CAPABILITIES" "https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci?SERVICE=WMS&REQUEST=GetCapabilities"
+          test_url "EPODGIK_CAPABILITIES" "https://wms16.epodgik.pl/cgi-bin/Wlasnosc?SERVICE=WMS&REQUEST=GetCapabilities"
+
+          for target in GUGIK EPODGIK; do
+            if [ "$target" = GUGIK ]; then
+              base="https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci"
+            else
+              base="https://wms16.epodgik.pl/cgi-bin/Wlasnosc"
+            fi
+            for crs in EPSG:3857 EPSG:2180; do
+              url="${base}?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=dzialki&STYLES=&SRS=${crs}&BBOX=21.25,53.0,21.30,53.05&WIDTH=800&HEIGHT=800&FORMAT=image/png&TRANSPARENT=TRUE"
+              test_url "${target}_GETMAP_${crs}" "$url"
+            done
+          done
+
+      - name: Commit diagnostic result
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ownership-diagnostic.txt
+          git commit -m "Record temporary ownership WMS diagnostic" || exit 0
+          git push
