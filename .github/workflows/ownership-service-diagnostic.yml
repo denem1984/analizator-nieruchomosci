@@ -14,38 +14,54 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Test global ownership services
+      - name: Test exact global ownership layers
         shell: bash
         run: |
           set +e
           : > ownership-diagnostic-summary.txt
           echo "DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ownership-diagnostic-summary.txt
 
-          for spec in \
-            "GUGIK|https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci" \
-            "EPODGIK|https://wms16.epodgik.pl/cgi-bin/Wlasnosc"; do
-            name="${spec%%|*}"
-            base="${spec#*|}"
-            cap="/tmp/${name}.xml"
-            hdr="/tmp/${name}.hdr"
-            curl -L --max-time 60 -sS -D "$hdr" -o "$cap" "$base?SERVICE=WMS&REQUEST=GetCapabilities"
-            rc=$?
-            echo "===== $name CAPABILITIES =====" >> ownership-diagnostic-summary.txt
-            echo "curl_exit=$rc" >> ownership-diagnostic-summary.txt
-            echo "$(grep -Ei '^(HTTP/|content-type:|content-length:)' "$hdr" | tr '\n' ' ')" >> ownership-diagnostic-summary.txt
-            echo "size=$(wc -c < "$cap" 2>/dev/null)" >> ownership-diagnostic-summary.txt
-            echo "layers:" >> ownership-diagnostic-summary.txt
-            grep -oE '<(Name|Title)>[^<]+' "$cap" 2>/dev/null | sed 's/<Name>/NAME: /;s/<Title>/TITLE: /' | head -80 >> ownership-diagnostic-summary.txt
-
+          test_map() {
+            name="$1"
+            base="$2"
+            layer="$3"
+            bbox="$4"
             out="/tmp/${name}.png"
-            curl -L --max-time 90 -sS -D "/tmp/${name}.map.hdr" -o "$out" "$base?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=dzialki&STYLES=&SRS=EPSG:4326&BBOX=13.2,48.4,25.4,55.4&WIDTH=1200&HEIGHT=800&FORMAT=image/png&TRANSPARENT=TRUE"
-            mrc=$?
-            echo "===== $name GETMAP dzialki =====" >> ownership-diagnostic-summary.txt
-            echo "curl_exit=$mrc" >> ownership-diagnostic-summary.txt
-            echo "$(grep -Ei '^(HTTP/|content-type:|content-length:)' "/tmp/${name}.map.hdr" | tr '\n' ' ')" >> ownership-diagnostic-summary.txt
-            echo "size=$(wc -c < "$out" 2>/dev/null)" >> ownership-diagnostic-summary.txt
-            echo "file=$(file -b "$out" 2>/dev/null)" >> ownership-diagnostic-summary.txt
-          done
+            hdr="/tmp/${name}.hdr"
+            url="${base}?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=${layer}&STYLES=&SRS=EPSG:4326&BBOX=${bbox}&WIDTH=1000&HEIGHT=700&FORMAT=image/png&TRANSPARENT=TRUE"
+            curl -L --max-time 90 -sS -D "$hdr" -o "$out" "$url"
+            rc=$?
+            echo "===== $name =====" >> ownership-diagnostic-summary.txt
+            echo "layer=$layer bbox=$bbox curl_exit=$rc" >> ownership-diagnostic-summary.txt
+            echo "$(grep -Ei '^(HTTP/|content-type:|content-length:)' "$hdr" | tr '\n' ' ')" >> ownership-diagnostic-summary.txt
+            echo "size=$(wc -c < "$out" 2>/dev/null) file=$(file -b "$out" 2>/dev/null)" >> ownership-diagnostic-summary.txt
+            python3 - "$out" <<'PY' >> ownership-diagnostic-summary.txt
+import sys
+try:
+    from PIL import Image
+    from collections import Counter
+    im=Image.open(sys.argv[1]).convert('RGBA')
+    px=list(im.getdata())
+    alpha=Counter(p[3] for p in px)
+    opaque=[p[:3] for p in px if p[3]>0]
+    colors=Counter(opaque)
+    print('image=%sx%s nontransparent=%d/%d alpha_top=%s' % (im.width,im.height,len(opaque),len(px),alpha.most_common(5)))
+    print('top_rgb=%s' % (colors.most_common(12),))
+except Exception as e:
+    print('IMAGE_ANALYSIS_ERROR %r' % (e,))
+PY
+          }
+
+          GUGIK='https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci'
+          EPOD='https://wms16.epodgik.pl/cgi-bin/Wlasnosc'
+
+          test_map GUGIK_WARSAW "$GUGIK" dzialki '20.90,52.05,21.20,52.35'
+          test_map GUGIK_SZCZECIN "$GUGIK" dzialki '14.40,53.30,14.75,53.60'
+          test_map GUGIK_PISZ "$GUGIK" dzialki '21.70,53.50,21.90,53.70'
+
+          test_map EPOD_GRUPY_WARSAW "$EPOD" grupy '20.90,52.05,21.20,52.35'
+          test_map EPOD_GRUPY_SRC_WARSAW "$EPOD" grupy_src '20.90,52.05,21.20,52.35'
+          test_map EPOD_GRUPY_UZUP_WARSAW "$EPOD" grupy_uzup '20.90,52.05,21.20,52.35'
 
       - name: Commit diagnostic summary
         shell: bash
@@ -53,5 +69,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add ownership-diagnostic-summary.txt
-          git commit -m "Record ownership WMS diagnostic summary" || exit 0
+          git commit -m "Record exact ownership layer diagnostic" || exit 0
           git push
