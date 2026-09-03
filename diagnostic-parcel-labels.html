@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tester – numery działek</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
+<style>
+html,body{height:100%;margin:0;font-family:Arial,sans-serif;color:#0f172a;background:#f8fafc}
+#app{height:100vh;display:flex}#panel{width:360px;min-width:360px;overflow:auto;background:#fff;border-right:1px solid #cbd5e1;padding:14px;box-sizing:border-box}#map{flex:1;height:100vh}
+h1{font-size:19px;margin:0 0 4px}.sub{font-size:12px;color:#64748b;margin-bottom:14px}.card{border:1px solid #cbd5e1;border-radius:9px;padding:11px;margin:10px 0;background:#fff}h2{font-size:14px;margin:0 0 9px}label{display:block;font-size:11px;font-weight:700;color:#475569;margin:7px 0 4px}input,select,button{box-sizing:border-box;width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:7px;background:#fff}button{background:#2563eb;color:#fff;font-weight:700;cursor:pointer;margin-top:7px}button.secondary{background:#475569}button.active{outline:3px solid #bfdbfe}.check{display:flex;gap:7px;align-items:center;font-size:12px;margin:7px 0}.check input{width:auto}.method{border:1px solid #cbd5e1;border-radius:7px;padding:8px;margin:7px 0;font-size:12px}.method b{display:block;margin-bottom:3px}.status{padding:8px;border-radius:7px;font-size:11px;margin-top:8px;background:#eff6ff;color:#1d4ed8}.ok{background:#f0fdf4;color:#166534}.err{background:#fef2f2;color:#991b1b}.small{font-size:10px;color:#64748b;line-height:1.35}.stat{font-family:monospace;font-size:11px;white-space:pre-wrap}.legendLine{display:inline-block;width:22px;border-top:2px solid #2563eb;vertical-align:middle;margin-right:5px}.legendText{display:inline-block;width:22px;text-align:center;font-weight:700;color:#104e8b;margin-right:5px}.leaflet-control-zoom{margin-top:55px!important}
+/* Solution B: fixed screen-size HTML labels */
+.lblB{font-family:Arial,sans-serif;font-weight:600;color:#104e8b;white-space:nowrap;text-align:center;line-height:1;pointer-events:none;transform:translate(-50%,-50%)}
+/* Solution C/D: vector labels */
+.lblC,.lblD{font-family:Arial,sans-serif;font-weight:600;fill:#104e8b;paint-order:stroke;stroke:#fff;stroke-width:2px;stroke-linejoin:round;pointer-events:none;text-anchor:middle;dominant-baseline:middle}
+</style>
+</head>
+<body>
+<div id="app">
+<aside id="panel">
+<h1>Tester: numery działek</h1>
+<div class="sub">Porównanie kilku sposobów renderowania numerów działek. Tester jest niezależny od produkcyjnej warstwy mapy.</div>
+<div class="card">
+<h2>1. Działka testowa</h2>
+<label>Identyfikator ULDK</label><input id="pid" value="281603_5.0017.1/48">
+<label>Zasięg WFS wokół działki</label><select id="radius"><option value="300">300 m</option><option value="500" selected>500 m</option><option value="800">800 m</option><option value="1200">1200 m</option></select>
+<button id="load">Wczytaj działkę i dane testowe</button>
+<div id="status" class="status">Gotowy.</div>
+</div>
+<div class="card">
+<h2>2. Rozwiązania</h2>
+<div class="method"><b>A — oficjalny WMS GUGiK</b>Osobno <code>dzialki</code> i <code>numery_dzialek</code>. To jest wzorzec referencyjny: dokładnie sprawdzamy, jak zachowuje się oficjalna warstwa.</div>
+<div class="method"><b>B — WMS granic + HTML/Leaflet</b>Granice pozostają rastrowym WMS, a numery są niezależnymi etykietami HTML. Rozmiar czcionki sterowany zoomem.</div>
+<div class="method"><b>C — WFS wektor: granice + HTML</b>Ta sama geometria działek jest pobierana jako wektor. Granice i numery tworzymy po stronie przeglądarki.</div>
+<div class="method"><b>D — WFS wektor: SVG</b>Granice i numery są rysowane przez renderer SVG Leaflet. To wariant do sprawdzenia, czy etykietowanie wektorowe zachowuje się lepiej przy zoomowaniu.</div>
+<label>Widoczność</label>
+<div class="check"><input id="a" type="checkbox" checked><span><span class="legendLine"></span>A — WMS granice</span></div>
+<div class="check"><input id="al" type="checkbox" checked><span><span class="legendText">12</span>A — WMS numery</span></div>
+<div class="check"><input id="b" type="checkbox" checked><span><span class="legendText">12</span>B — HTML</span></div>
+<div class="check"><input id="c" type="checkbox" checked><span><span class="legendText">12</span>C — WFS + HTML</span></div>
+<div class="check"><input id="d" type="checkbox" checked><span><span class="legendText">12</span>D — WFS + SVG</span></div>
+</div>
+<div class="card">
+<h2>3. Parametry etykiet</h2>
+<label>B — rozmiar minimalny</label><input id="bmin" type="number" value="10" min="6" max="30">
+<label>B — rozmiar maksymalny</label><input id="bmax" type="number" value="16" min="8" max="40">
+<label>B — skala zoomu</label><select id="bscale"><option value="0.55">wolna</option><option value="0.72" selected>średnia</option><option value="0.9">szybka</option></select>
+<label>C/D — rozmiar bazowy</label><input id="vbase" type="number" value="11" min="6" max="30">
+<label>C/D — zachowanie</label><select id="vscale"><option value="none">stały rozmiar ekranowy</option><option value="zoom" selected>dynamiczny z zoomem</option><option value="map">mapowy — skaluje się wraz z mapą</option></select>
+<button class="secondary" id="fit">Przywróć widok działki</button>
+</div>
+<div class="card"><h2>4. Diagnostyka</h2><div id="stats" class="stat">Brak danych.</div></div>
+<div class="card small"><b>Cel testu:</b> znaleźć wariant, który daje efekt zbliżony do e-mapy: numer ma być czytelny, nie może być „naklejką” o stałej wielkości względem działki i nie może zależeć od rastrowego pogrubiania. Po wyborze wariantu dopiero przeniesiemy rozwiązanie do produkcji.</div>
+</aside>
+<main id="map"></main>
+</div>
+<script>
+const WMS="https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow";
+const WFS="https://mapy.geoportal.gov.pl/wss/service/PZGIK/EGIB/WFS/UslugaZbiorcza";
+const ULDK="https://uldk.gugik.gov.pl/";
+proj4.defs("EPSG:2180","+proj=tmerc +lat_0=0 +lon_0=19 +k=0.9993 +x_0=500000 +y_0=-5300000 +ellps=GRS80 +units=m +no_defs");
+const map=L.map("map",{maxZoom:22,zoomControl:true}).setView([53.1,21.9],15);
+const base=L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:22,attribution:"© OpenStreetMap"}).addTo(map);
+const paneW=L.DomUtil.create("div","",map.getPanes().overlayPane); // harmless marker for diagnostics
+const wmsBoundary=L.tileLayer.wms(WMS,{layers:"dzialki",format:"image/png",transparent:true,opacity:.95,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1});
+const wmsLabels=L.tileLayer.wms(WMS,{layers:"numery_dzialek",format:"image/png",transparent:true,opacity:.95,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1});
+const htmlLayer=L.layerGroup().addTo(map), vectorHtml=L.layerGroup().addTo(map), vectorSvg=L.layerGroup().addTo(map);
+let features=[],selected=null,requestSeq=0,lastBounds=null;
+function esc(s){return String(s??"").replace(/[&<>\"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]))}
+function status(t,c="status"){const e=document.getElementById("status");e.className=c;e.textContent=t}
+function parseWkt(w){if(!w)return null;const m=w.match(/^\s*(MULTIPOLYGON|POLYGON)\s*\(\((.*)\)\)\s*$/i);if(!m)return null;return w}
+function centroid(coords){let pts=[];function collect(x){if(typeof x[0]==="number")pts.push(x);else x.forEach(collect)}collect(coords);if(!pts.length)return null;let sx=0,sy=0;pts.forEach(p=>{sx+=p[0];sy+=p[1]});return[sx/pts.length,sy/pts.length]}
+function gmlFeatures(xml){const doc=new DOMParser().parseFromString(xml,"application/xml");if(doc.querySelector("parsererror"))throw Error("Nie udało się sparsować GML");const members=[...doc.getElementsByTagNameNS("http://www.opengis.net/wfs/2.0","member")];const out=[];for(const mem of members){let feat=null;for(const n of mem.children){if(n.localName!=="member"){feat=n;break}}if(!feat)feat=mem.firstElementChild;if(!feat)continue;let id="";for(const n of feat.children){if(n.localName==="id_dzialki")id=n.textContent.trim()}let geom=feat.querySelector("geom");if(!geom)geom=[...feat.children].find(x=>x.localName==="geom");if(!geom)continue;let polys=[];const rings=[...geom.getElementsByTagNameNS("http://www.opengis.net/gml/3.2","posList")];for(const r of rings){const nums=r.textContent.trim().split(/\s+/).map(Number);let pts=[];for(let i=0;i+1<nums.length;i+=2){const y=nums[i],x=nums[i+1];const ll=proj4("EPSG:2180","EPSG:4326",[x,y]);pts.push([ll[1],ll[0]])}if(pts.length>2)polys.push(pts)}if(polys.length)out.push({id,polys});}return out}
+function polyCentroid(poly){let area=0,cx=0,cy=0;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const x0=poly[j][1],y0=poly[j][0],x1=poly[i][1],y1=poly[i][0],cr=x0*y1-x1*y0;area+=cr;cx+=(x0+x1)*cr;cy+=(y0+y1)*cr}if(Math.abs(area)<1e-10)return[poly[0][0],poly[0][1]];return[cy/(3*area),cx/(3*area)]}
+function featureCenter(f){return f.polys.length?polyCentroid(f.polys[0]):null}
+function displayId(id){const s=String(id||"");return s.includes(".")?s.split(".").pop():s}
+function labelSize(){const z=map.getZoom(),min=+document.getElementById("bmin").value,max=+document.getElementById("bmax").value,scale=+document.getElementById("bscale").value;return Math.max(min,Math.min(max,min+(z-13)*scale))}
+function vectorFontSize(){const z=map.getZoom(),base=+document.getElementById("vbase").value,mode=document.getElementById("vscale").value;if(mode==="none")return base;if(mode==="zoom")return Math.max(8,Math.min(22,base+(z-13)*.65));return Math.max(4,Math.min(60,base*Math.pow(1.7,z-15)))}
+function makeHtmlLabel(ll,text,cls,size){const icon=L.divIcon({className:cls,html:`<span>${esc(text)}</span>`,iconSize:[1,1],iconAnchor:[0,0]});const m=L.marker(ll,{icon,interactive:false,keyboard:false});m._labelText=text;m._labelSize=size;return m}
+function renderB(){htmlLayer.clearLayers();if(!document.getElementById("b").checked)return;const size=labelSize();features.forEach(f=>{const ll=featureCenter(f);if(!ll)return;const m=makeHtmlLabel(ll,displayId(f.id),"lblB",size);htmlLayer.addLayer(m)});htmlLayer.eachLayer(m=>m.getElement()?.style.setProperty("font-size",size+"px"))}
+function renderVector(){vectorHtml.clearLayers();vectorSvg.clearLayers();const mode=document.getElementById("vscale").value,size=vectorFontSize();if(document.getElementById("c").checked){features.forEach(f=>{const ll=featureCenter(f);if(!ll)return;const m=makeHtmlLabel(ll,displayId(f.id),"lblB",size);vectorHtml.addLayer(m)});vectorHtml.eachLayer(m=>m.getElement()?.style.setProperty("font-size",size+"px"))}if(document.getElementById("d").checked){features.forEach(f=>{const ll=featureCenter(f);if(!ll)return;const m=L.marker(ll,{interactive:false,keyboard:false,icon:L.divIcon({className:"",html:`<svg width="1" height="1" overflow="visible"><text class="lblD" font-size="${size}px">${esc(displayId(f.id))}</text></svg>`,iconSize:[1,1],iconAnchor:[0,0]})});vectorSvg.addLayer(m)})}}
+function updateStats(extra=""){document.getElementById("stats").textContent=`zoom: ${map.getZoom()}\nWFS obiekty: ${features.length}\nB czcionka: ${labelSize().toFixed(1)} px\nC/D czcionka: ${vectorFontSize().toFixed(1)} px\n${extra}`}
+async function loadULDK(id){const u=new URL(ULDK);u.searchParams.set("request","GetParcelById");u.searchParams.set("id",id);u.searchParams.set("result","id,teryt,parcel,county,commune,region,geom_wkt");u.searchParams.set("srid","4326");const r=await fetch(u);const t=await r.text();if(!r.ok)throw Error("ULDK HTTP "+r.status);const lines=t.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const line=lines.find(x=>/POLYGON/i.test(x));if(!line)throw Error("ULDK nie zwrócił geometrii");const parts=line.split("|");const idx=parts.findIndex(x=>/^(MULTIPOLYGON|POLYGON)/i.test(x));return {raw:t,wkt:idx>=0?parts[idx]:null}}
+function bbox2180Around4326(ll,r){const [x,y]=proj4("EPSG:4326","EPSG:2180",[ll[1],ll[0]]);return [x-r,y-r,x+r,y+r]}
+async function loadWFS(ll,r){const [xmin,ymin,xmax,ymax]=bbox2180Around4326(ll,r);const u=new URL(WFS);u.searchParams.set("service","WFS");u.searchParams.set("version","2.0.0");u.searchParams.set("request","GetFeature");u.searchParams.set("typenames","ms:dzialki");u.searchParams.set("srsName","EPSG:2180");u.searchParams.set("bbox",`${xmin},${ymin},${xmax},${ymax},EPSG:2180`);u.searchParams.set("count","1000");u.searchParams.set("propertyName","id_dzialki,geom");const r2=await fetch(u);const text=await r2.text();if(!r2.ok)throw Error("WFS HTTP "+r2.status);return {url:u.href,features:gmlFeatures(text),raw:text}}
+async function load(){const my=++requestSeq;const id=document.getElementById("pid").value.trim();if(!id)return;status("Pobieram ULDK…");try{const u=await loadULDK(id);if(my!==requestSeq)return;let wkt=u.wkt;let geomLL=[];const nums=wkt.replace(/^[^(]+\(\(/i,"").replace(/\)\)+$/i,"").split(/,\s*/).map(x=>x.trim().split(/\s+/).map(Number));for(const p of nums){if(p.length>=2){const q=proj4("EPSG:4326","EPSG:4326",[p[0],p[1]]);geomLL.push([q[1],q[0]])}}selected=geomLL.length?L.polygon(geomLL):null;if(selected){map.fitBounds(selected.getBounds(),{padding:[60,60]});lastBounds=selected.getBounds()}const center=selected?selected.getBounds().getCenter():map.getCenter();status("ULDK OK. Pobieram działki z WFS…");const wf=await loadWFS([center.lat,center.lng],+document.getElementById("radius").value);if(my!==requestSeq)return;features=wf.features;renderB();renderVector();updateStats(`WFS: ${features.length} obiektów\nBBOX: ${wf.url.slice(0,220)}…`);status(`OK — ULDK + WFS. Załadowano ${features.length} działek.`,"status ok");}catch(e){console.error(e);status("BŁĄD: "+e.message,"status err");document.getElementById("stats").textContent="Błąd: "+e.message}}
+function sync(){if(document.getElementById("a").checked)wmsBoundary.addTo(map);else map.removeLayer(wmsBoundary);if(document.getElementById("al").checked)wmsLabels.addTo(map);else map.removeLayer(wmsLabels);renderB();renderVector();updateStats()}
+document.getElementById("load").onclick=load;document.getElementById("fit").onclick=()=>{if(lastBounds)map.fitBounds(lastBounds,{padding:[60,60]})};["a","al","b","c","d"].forEach(id=>document.getElementById(id).onchange=sync);["bmin","bmax","bscale","vbase","vscale"].forEach(id=>document.getElementById(id).oninput=()=>{renderB();renderVector();updateStats()});map.on("zoomend moveend",()=>{renderB();renderVector();updateStats()});
+wmsBoundary.addTo(map);wmsLabels.addTo(map);
+load();
+</script>
+</body>
+</html>
