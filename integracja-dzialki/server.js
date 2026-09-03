@@ -17,7 +17,7 @@ function replacementLoader(){return `async function loadParcelLabels(){
   const south=Math.max(-90,b.getSouth()-latSpan*pad),north=Math.min(90,b.getNorth()+latSpan*pad);
   const west=b.getWest()-lonSpan*pad,east=b.getEast()+lonSpan*pad;
   const u=new URL(location.origin+"/api/wfs");
-  const q={service:"WFS",version:"2.0.0",request:"GetFeature",typenames:"ms:dzialki",bbox:\`${south},${west},${north},${east},EPSG:4326\`,srsName:"EPSG:4326",outputFormat:"application/json",count:"2000",propertyName:"id_dzialki,geom"};
+  const q={service:"WFS",version:"2.0.0",request:"GetFeature",typenames:"ms:dzialki",bbox:\`\${south},\${west},\${north},\${east},EPSG:4326\`,srsName:"EPSG:4326",outputFormat:"application/json",count:"2000",propertyName:"id_dzialki,geom"};
   Object.entries(q).forEach(([k,v])=>u.searchParams.set(k,v));
   try{
     const res=await fetch(u.href,{headers:{Accept:"application/json"}});
@@ -40,7 +40,7 @@ function replacementLoader(){return `async function loadParcelLabels(){
 
 async function getHtml(){
  if(cachedHtml&&Date.now()-cachedAt<30000)return cachedHtml;
- const r=await fetch(SOURCE,{headers:{'Cache-Control':'no-cache','User-Agent':'MAPA integration/6.0'}});
+ const r=await fetch(SOURCE,{headers:{'Cache-Control':'no-cache','User-Agent':'MAPA integration/7.0'}});
  if(!r.ok)throw new Error('GitHub source HTTP '+r.status);
  let html=await r.text();
  const start=html.indexOf('async function loadParcelLabels(){');
@@ -66,10 +66,10 @@ async function proxyApi(req,res){
 }
 http.createServer(async(req,res)=>{try{const u=new URL(req.url,'http://localhost');console.log('INTEGRATION_REQUEST',req.method,u.pathname,u.search);
  if(req.method==='OPTIONS')return send(res,204,'text/plain','');
- if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA integration WFS v6'}));
+ if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA integration WFS v7'}));
  if(u.pathname==='/source-check'){const html=await getHtml();return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,loaderReplaced:html.includes('MAPA_WFS_OK'),fontMax16:html.includes('Math.min(16,10+(z-13)*.72)'),htmlLength:html.length,cachedAt:new Date(cachedAt).toISOString()}));}
  if(u.pathname==='/api/wfs')return proxyApi(req,res);
  if(u.pathname==='/test-wfs'){const target=new URL(API);target.searchParams.set('bbox','53.0,14.0,53.1,14.1');console.log('INTEGRATION_TEST_WFS',target.href);const r=await fetch(target.href,{headers:{Accept:'application/json'}});const body=await r.text();return send(res,r.status,r.headers.get('content-type')||'application/json; charset=utf-8',body)}
  if(u.pathname==='/'||u.pathname==='/index.html')return send(res,200,'text/html; charset=utf-8',await getHtml());
  return send(res,404,'text/plain; charset=utf-8','Not found');
-}catch(e){console.error('INTEGRATION_ERROR',e);return send(res,500,'text/plain; charset=utf-8','Błąd integracji: '+e.message)}}).listen(PORT,'0.0.0.0',()=>console.log('MAPA integration WFS v6 listening on '+PORT));
+}catch(e){console.error('INTEGRATION_ERROR',e);return send(res,500,'text/plain; charset=utf-8','Błąd integracji: '+e.message)}}).listen(PORT,'0.0.0.0',()=>console.log('MAPA integration WFS v7 listening on '+PORT));
