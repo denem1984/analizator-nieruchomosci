@@ -12,9 +12,9 @@ async function getHtml(){
   let html=await r.text();
   const m=html.match(WFS_RE);
   if(!m)throw new Error('Nie znaleziono deklaracji parcelWfs w źródle produkcyjnym.');
-  html=html.replace(WFS_RE,'const parcelWfs="/api/wfs"');
-  html=html.replace(/Math\.min\(15,10\+\(z-13\)\.72\)/g,'Math.min(16,10+(z-13)*.72)');
-  const wfsOk=html.includes('const parcelWfs="/api/wfs"');
+  html=html.replace(WFS_RE,'const parcelWfs=location.origin+"/api/wfs"');
+  html=html.replace(/Math\.min\(15,10\+\(z-13\)\*\.72\)/g,'Math.min(16,10+(z-13)*.72)');
+  const wfsOk=html.includes('const parcelWfs=location.origin+"/api/wfs"');
   if(!wfsOk)throw new Error('Nie udało się podmienić źródła WFS.');
   cachedHtml=html;cachedAt=Date.now();
   console.log('INTEGRATION_SOURCE_OK',JSON.stringify({wfsReplaced:wfsOk,font16:html.includes('Math.min(16,10+(z-13)*.72)'),length:html.length}));
@@ -48,7 +48,7 @@ http.createServer(async(req,res)=>{
     if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA integration WFS v4'}));
     if(u.pathname==='/source-check'){
       const html=await getHtml();
-      return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,wfsProxy:html.includes('const parcelWfs="/api/wfs"'),fontMax16:html.includes('Math.min(16,10+(z-13)*.72)'),htmlLength:html.length,cachedAt:new Date(cachedAt).toISOString()}));
+      return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,wfsProxy:html.includes('const parcelWfs=location.origin+"/api/wfs"'),fontMax16:html.includes('Math.min(16,10+(z-13)*.72)'),htmlLength:html.length,cachedAt:new Date(cachedAt).toISOString()}));
     }
     if(u.pathname==='/api/wfs')return proxyApi(req,res);
     if(u.pathname==='/'||u.pathname==='/index.html')return send(res,200,'text/html; charset=utf-8',await getHtml());
