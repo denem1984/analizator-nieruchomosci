@@ -4,7 +4,6 @@ on:
   push:
     paths:
       - '.github/workflows/ownership-service-diagnostic.yml'
-      - 'diagnostic-trigger.txt'
 
 jobs:
   test:
@@ -15,52 +14,61 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Test ownership services
+      - name: Test global ownership services
         shell: bash
         run: |
           set +e
           : > ownership-diagnostic.txt
           echo "DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ownership-diagnostic.txt
-          echo >> ownership-diagnostic.txt
 
-          test_url() {
+          test_caps() {
             name="$1"
             url="$2"
-            echo "===== $name =====" >> ownership-diagnostic.txt
-            echo "$url" >> ownership-diagnostic.txt
-            rm -f /tmp/headers /tmp/body
-            curl -L --max-time 45 -sS -D /tmp/headers -o /tmp/body "$url"
+            out="/tmp/${name}.xml"
+            curl -L --max-time 60 -sS -o "$out" "$url"
             rc=$?
+            echo "===== $name CAPABILITIES =====" >> ownership-diagnostic.txt
             echo "curl_exit=$rc" >> ownership-diagnostic.txt
-            echo "--- headers ---" >> ownership-diagnostic.txt
-            sed -n '1,20p' /tmp/headers >> ownership-diagnostic.txt 2>/dev/null
-            echo "--- file ---" >> ownership-diagnostic.txt
-            file /tmp/body >> ownership-diagnostic.txt 2>/dev/null
-            echo "--- size ---" >> ownership-diagnostic.txt
-            wc -c /tmp/body >> ownership-diagnostic.txt 2>/dev/null
-            echo "--- text preview ---" >> ownership-diagnostic.txt
-            if grep -Iq . /tmp/body 2>/dev/null; then
-              head -c 8000 /tmp/body >> ownership-diagnostic.txt
-            else
-              echo "BINARY_RESPONSE" >> ownership-diagnostic.txt
+            echo "size=$(wc -c < "$out" 2>/dev/null)" >> ownership-diagnostic.txt
+            echo "content_type=$(file -b "$out" 2>/dev/null)" >> ownership-diagnostic.txt
+            if [ -s "$out" ]; then
+              echo "layers:" >> ownership-diagnostic.txt
+              python3 - "$out" <<'PY' >> ownership-diagnostic.txt
+import sys, xml.etree.ElementTree as ET
+p=sys.argv[1]
+try:
+    root=ET.parse(p).getroot()
+    for e in root.iter():
+        if e.tag.split('}')[-1]=='Layer':
+            n=next((x.text for x in list(e) if x.tag.split('}')[-1]=='Name'),None)
+            t=next((x.text for x in list(e) if x.tag.split('}')[-1]=='Title'),None)
+            if n: print(f"{n} | {t or ''}")
+except Exception as ex: print('XML_PARSE_ERROR',repr(ex))
+PY
             fi
-            echo >> ownership-diagnostic.txt
           }
 
-          test_url "GUGIK_CAPABILITIES" "https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci?SERVICE=WMS&REQUEST=GetCapabilities"
-          test_url "EPODGIK_CAPABILITIES" "https://wms16.epodgik.pl/cgi-bin/Wlasnosc?SERVICE=WMS&REQUEST=GetCapabilities"
+          test_map() {
+            name="$1"
+            base="$2"
+            layer="$3"
+            out="/tmp/${name}.png"
+            url="${base}?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=${layer}&STYLES=&SRS=EPSG:4326&BBOX=13.2,48.4,25.4,55.4&WIDTH=1200&HEIGHT=800&FORMAT=image/png&TRANSPARENT=TRUE"
+            curl -L --max-time 90 -sS -D "/tmp/${name}.headers" -o "$out" "$url"
+            rc=$?
+            echo "===== $name GETMAP =====" >> ownership-diagnostic.txt
+            echo "curl_exit=$rc" >> ownership-diagnostic.txt
+            echo "$(sed -n '1,12p' "/tmp/${name}.headers" 2>/dev/null | tr '\n' ' ')" >> ownership-diagnostic.txt
+            echo "size=$(wc -c < "$out" 2>/dev/null)" >> ownership-diagnostic.txt
+            echo "file=$(file -b "$out" 2>/dev/null)" >> ownership-diagnostic.txt
+          }
 
-          for target in GUGIK EPODGIK; do
-            if [ "$target" = GUGIK ]; then
-              base="https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci"
-            else
-              base="https://wms16.epodgik.pl/cgi-bin/Wlasnosc"
-            fi
-            for crs in EPSG:3857 EPSG:2180; do
-              url="${base}?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=dzialki&STYLES=&SRS=${crs}&BBOX=21.25,53.0,21.30,53.05&WIDTH=800&HEIGHT=800&FORMAT=image/png&TRANSPARENT=TRUE"
-              test_url "${target}_GETMAP_${crs}" "$url"
-            done
-          done
+          GUGIK='https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci'
+          EPOD='https://wms16.epodgik.pl/cgi-bin/Wlasnosc'
+          test_caps GUGIK "$GUGIK?SERVICE=WMS&REQUEST=GetCapabilities"
+          test_caps EPODGIK "$EPOD?SERVICE=WMS&REQUEST=GetCapabilities"
+          test_map GUGIK_DZIALKI "$GUGIK" dzialki
+          test_map EPODGIK_DZIALKI "$EPOD" dzialki
 
       - name: Commit diagnostic result
         shell: bash
@@ -68,5 +76,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add ownership-diagnostic.txt
-          git commit -m "Record temporary ownership WMS diagnostic" || exit 0
+          git commit -m "Record global ownership WMS diagnostic" || exit 0
           git push
