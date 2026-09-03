@@ -23,9 +23,67 @@ jobs:
           curl -L --max-time 90 -sS -D /tmp/g.h -o /tmp/g.png 'https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=dzialki&STYLES=&SRS=EPSG:4326&BBOX=20.90,52.05,21.20,52.35&WIDTH=1000&HEIGHT=700&FORMAT=image/png&TRANSPARENT=TRUE'
           grep -Ei '^(HTTP/|content-type:|content-length:)' /tmp/g.h || true
           file /tmp/g.png
-          python3 -c "from PIL import Image; from collections import Counter; im=Image.open('/tmp/g.png').convert('RGBA'); p=list(im.getdata()); print('GUGIK size',im.size,'alpha',Counter(x[3] for x in p).most_common(5),'colors',Counter(x[:3] for x in p if x[3]>0).most_common(12))"
+          echo '--- GUGIK PNG COLOR ANALYSIS ---'
+          python3 - /tmp/g.png <<'PY'
+import sys,struct,zlib
+from collections import Counter
+p=sys.argv[1]; b=open(p,'rb').read(); pos=8; w=h=ct=bd=None; raw=b''
+while pos<len(b):
+    n=struct.unpack('>I',b[pos:pos+4])[0]; typ=b[pos+4:pos+8]; data=b[pos+8:pos+8+n]; pos+=12+n
+    if typ==b'IHDR': w,h,bd,ct,_,_,_=struct.unpack('>IIBBBBB',data)
+    elif typ==b'IDAT': raw+=data
+    elif typ==b'IEND': break
+print('header',w,h,bd,ct)
+if bd==8 and ct==6:
+    d=zlib.decompress(raw); stride=w*4; rows=[]; prev=bytearray(stride); off=0
+    for y in range(h):
+        f=d[off]; off+=1; cur=bytearray(d[off:off+stride]); off+=stride
+        for i in range(stride):
+            a=cur[i-4] if i>=4 else 0; u=prev[i]; ul=prev[i-4] if i>=4 else 0
+            if f==1: cur[i]=(cur[i]+a)&255
+            elif f==2: cur[i]=(cur[i]+u)&255
+            elif f==3: cur[i]=(cur[i]+((a+u)//2))&255
+            elif f==4:
+                q=a+u-ul; pa=abs(q-a); pb=abs(q-u); pc=abs(q-ul); pr=a if pa<=pb and pa<=pc else (u if pb<=pc else ul); cur[i]=(cur[i]+pr)&255
+        rows.append(cur); prev=cur
+    c=Counter()
+    for row in rows:
+        for i in range(0,len(row),4):
+            r,g,bl,a=row[i:i+4]
+            if a: c[(r,g,bl,a)]+=1
+    print('top_rgba',c.most_common(20))
+else: print('unsupported_png')
+PY
           echo '--- EPODGIK GRUPY GETMAP ---'
           curl -L --max-time 90 -sS -D /tmp/e.h -o /tmp/e.png 'https://wms16.epodgik.pl/cgi-bin/Wlasnosc?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=grupy&STYLES=&SRS=EPSG:4326&BBOX=20.90,52.05,21.20,52.35&WIDTH=1000&HEIGHT=700&FORMAT=image/png&TRANSPARENT=TRUE'
           grep -Ei '^(HTTP/|content-type:|content-length:)' /tmp/e.h || true
           file /tmp/e.png
-          python3 -c "from PIL import Image; from collections import Counter; im=Image.open('/tmp/e.png').convert('RGBA'); p=list(im.getdata()); print('EPODGIK size',im.size,'alpha',Counter(x[3] for x in p).most_common(5),'colors',Counter(x[:3] for x in p if x[3]>0).most_common(12))"
+          echo '--- EPODGIK PNG COLOR ANALYSIS ---'
+          python3 - /tmp/e.png <<'PY'
+import sys,struct,zlib
+from collections import Counter
+p=sys.argv[1]; b=open(p,'rb').read(); pos=8; w=h=ct=bd=None; raw=b''
+while pos<len(b):
+    n=struct.unpack('>I',b[pos:pos+4])[0]; typ=b[pos+4:pos+8]; data=b[pos+8:pos+8+n]; pos+=12+n
+    if typ==b'IHDR': w,h,bd,ct,_,_,_=struct.unpack('>IIBBBBB',data)
+    elif typ==b'IDAT': raw+=data
+    elif typ==b'IEND': break
+print('header',w,h,bd,ct)
+if bd==8 and ct==6:
+    d=zlib.decompress(raw); stride=w*4; prev=bytearray(stride); off=0; c=Counter()
+    for y in range(h):
+        f=d[off]; off+=1; cur=bytearray(d[off:off+stride]); off+=stride
+        for i in range(stride):
+            a=cur[i-4] if i>=4 else 0; u=prev[i]; ul=prev[i-4] if i>=4 else 0
+            if f==1: cur[i]=(cur[i]+a)&255
+            elif f==2: cur[i]=(cur[i]+u)&255
+            elif f==3: cur[i]=(cur[i]+((a+u)//2))&255
+            elif f==4:
+                q=a+u-ul; pa=abs(q-a); pb=abs(q-u); pc=abs(q-ul); pr=a if pa<=pb and pa<=pc else (u if pb<=pc else ul); cur[i]=(cur[i]+pr)&255
+        for i in range(0,stride,4):
+            r,g,bl,a=cur[i:i+4]
+            if a: c[(r,g,bl,a)]+=1
+        prev=cur
+    print('top_rgba',c.most_common(20))
+else: print('unsupported_png')
+PY
