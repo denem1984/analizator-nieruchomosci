@@ -1,0 +1,31 @@
+name: Ownership service probe
+
+on:
+  push:
+    paths:
+      - '.github/workflows/ownership-probe.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe ownership WMS
+        shell: bash
+        run: |
+          set -x
+          echo '--- GUGIK CAPABILITIES ---'
+          curl -L --max-time 60 -sS 'https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci?SERVICE=WMS&REQUEST=GetCapabilities' -o /tmp/g.xml
+          grep -oE '<Name>[^<]+' /tmp/g.xml | head -40
+          echo '--- EPODGIK CAPABILITIES ---'
+          curl -L --max-time 60 -sS 'https://wms16.epodgik.pl/cgi-bin/Wlasnosc?SERVICE=WMS&REQUEST=GetCapabilities' -o /tmp/e.xml
+          grep -oE '<Name>[^<]+' /tmp/e.xml | head -40
+          echo '--- GUGIK GETMAP ---'
+          curl -L --max-time 90 -sS -D /tmp/g.h -o /tmp/g.png 'https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=dzialki&STYLES=&SRS=EPSG:4326&BBOX=20.90,52.05,21.20,52.35&WIDTH=1000&HEIGHT=700&FORMAT=image/png&TRANSPARENT=TRUE'
+          grep -Ei '^(HTTP/|content-type:|content-length:)' /tmp/g.h || true
+          file /tmp/g.png
+          python3 -c "from PIL import Image; from collections import Counter; im=Image.open('/tmp/g.png').convert('RGBA'); p=list(im.getdata()); print('GUGIK size',im.size,'alpha',Counter(x[3] for x in p).most_common(5),'colors',Counter(x[:3] for x in p if x[3]>0).most_common(12))"
+          echo '--- EPODGIK GRUPY GETMAP ---'
+          curl -L --max-time 90 -sS -D /tmp/e.h -o /tmp/e.png 'https://wms16.epodgik.pl/cgi-bin/Wlasnosc?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=grupy&STYLES=&SRS=EPSG:4326&BBOX=20.90,52.05,21.20,52.35&WIDTH=1000&HEIGHT=700&FORMAT=image/png&TRANSPARENT=TRUE'
+          grep -Ei '^(HTTP/|content-type:|content-length:)' /tmp/e.h || true
+          file /tmp/e.png
+          python3 -c "from PIL import Image; from collections import Counter; im=Image.open('/tmp/e.png').convert('RGBA'); p=list(im.getdata()); print('EPODGIK size',im.size,'alpha',Counter(x[3] for x in p).most_common(5),'colors',Counter(x[:3] for x in p if x[3]>0).most_common(12))"
