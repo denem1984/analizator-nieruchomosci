@@ -1,0 +1,40 @@
+name: Fix ownership layer
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch ownership presentation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('index.html')
+          s = p.read_text(encoding='utf-8')
+          old = 'own:L.tileLayer.wms("https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci",{pane:"overlayPaneApp",layers:"dzialki",format:"image/png",transparent:true,opacity:.65,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1})'
+          new = 'own:L.tileLayer.wms("https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci",{pane:"overlayPaneApp",layers:"dzialki",format:"image/png",transparent:true,opacity:1,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1})'
+          if old not in s:
+              raise SystemExit('Ownership layer definition not found')
+          s = s.replace(old, new, 1)
+          marker = 'Object.entries(layers).forEach(([k,l])=>bind(k,l,k==="kiut"?"kiutL":k==="own"?"ownL":null));map.addLayer(layers.kieg);'
+          patch = 'Object.entries(layers).forEach(([k,l])=>bind(k,l,k==="kiut"?"kiutL":k==="own"?"ownL":null));document.getElementById("own").addEventListener("change",e=>{if(e.target.checked){if(map.hasLayer(layers.kieg))layers.kieg.setOpacity(0)}else{layers.kieg.setOpacity(.95)}});map.addLayer(layers.kieg);'
+          if marker not in s:
+              raise SystemExit('Layer binding marker not found')
+          s = s.replace(marker, patch, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet && exit 0
+          git commit -m "Fix ownership map presentation"
+          git push
