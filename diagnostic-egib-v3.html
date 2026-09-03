@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Diagnostyka EGiB v3 – powierzchnia ewidencyjna</title>
+<style>
+body{font-family:Arial,sans-serif;max-width:1100px;margin:24px auto;padding:0 16px;background:#f5f6f8;color:#222}
+.box{background:#fff;border:1px solid #ddd;border-radius:10px;padding:16px;margin:12px 0}
+button{padding:10px 16px;border:0;border-radius:7px;background:#166534;color:#fff;font-weight:700;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}.ok{color:#166534;font-weight:700}.err{color:#b91c1c;font-weight:700}.info{color:#1d4ed8;font-weight:700}
+.value{font-size:26px;font-weight:700}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:7px;text-align:left}
+pre{white-space:pre-wrap;word-break:break-word;background:#111;color:#eee;padding:12px;border-radius:8px;max-height:500px;overflow:auto;font-size:12px}
+</style>
+</head>
+<body>
+<h1>Diagnostyka EGiB v3 – powierzchnia ewidencyjna</h1>
+<div class="box">
+<p><b>Działka:</b> 281603_5.0017.1/48 (Łupki, Pisz)</p>
+<p>Źródło: KIEG/WMS, warstwa <b>dzialki</b>.</p>
+<p><b>Ważne:</b> test odczytuje wyłącznie wartość zwróconą przez EGiB. Nie oblicza powierzchni z geometrii i niczego nie zaokrągla.</p>
+<button id="run">Uruchom test</button>
+</div>
+<div class="box">
+<div id="status" class="info">Nie uruchomiono.</div>
+<div id="summary"></div>
+<table><thead><tr><th>Punkt</th><th>HTTP</th><th>ID działki</th><th>Atrybut EGiB</th><th>Wartość</th><th>Wynik</th></tr></thead>
+<tbody id="rows"></tbody></table>
+</div>
+<div class="box"><b>Surowe odpowiedzi:</b><pre id="raw">—</pre></div>
+<script>
+const WMS='https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow';
+const bbox={minx:687450,miny:645260,maxx:687570,maxy:645325};
+const points=[{x:687503,y:645290},{x:687505,y:645292},{x:687507,y:645294}];
+const btn=document.getElementById('run');
+const statusEl=document.getElementById('status');
+const summaryEl=document.getElementById('summary');
+const rowsEl=document.getElementById('rows');
+const rawEl=document.getElementById('raw');
+function getAttr(xml, wanted){
+  const attrs=[...xml.getElementsByTagName('Attribute')];
+  const a=attrs.find(x=>(x.getAttribute('Name')||'').trim().toLowerCase()===wanted.toLowerCase());
+  return a?(a.textContent||'').trim():'';
+}
+function getAttrByPart(xml, part){
+  const attrs=[...xml.getElementsByTagName('Attribute')];
+  const a=attrs.find(x=>(x.getAttribute('Name')||'').toLowerCase().includes(part.toLowerCase()));
+  return a?{name:a.getAttribute('Name')||'',value:(a.textContent||'').trim()}:null;
+}
+function request(x,y){
+  const u=new URL(WMS);
+  const q={SERVICE:'WMS',VERSION:'1.1.1',REQUEST:'GetFeatureInfo',SRS:'EPSG:2180',BBOX:`${bbox.minx},${bbox.miny},${bbox.maxx},${bbox.maxy}`,WIDTH:'1200',HEIGHT:'650',X:String(Math.round((x-bbox.minx)/(bbox.maxx-bbox.minx)*1200)),Y:String(Math.round((bbox.maxy-y)/(bbox.maxy-bbox.miny)*650)),LAYERS:'dzialki',QUERY_LAYERS:'dzialki',INFO_FORMAT:'text/xml',FORMAT:'image/png',TRANSPARENT:'TRUE'};
+  Object.entries(q).forEach(([k,v])=>u.searchParams.set(k,v));
+  return fetch(u).then(async r=>({status:r.status,url:u.href,text:await r.text()}));
+}
+btn.addEventListener('click',async()=>{
+  btn.disabled=true;statusEl.className='info';statusEl.textContent='Wykonuję 3 niezależne zapytania GetFeatureInfo…';summaryEl.innerHTML='';rowsEl.innerHTML='';rawEl.textContent='';
+  const details=[];
+  try{
+    for(const pt of points){
+      const r=await request(pt.x,pt.y);
+      let xml=null;try{xml=new DOMParser().parseFromString(r.text,'text/xml')}catch(e){}
+      const id=xml?getAttr(xml,'ID_DZIALKI'):'';
+      const area=xml?getAttrByPart(xml,'Pole pow. w ewidencji gruntów'):null;
+      const ok=r.status===200&&id==='281603_5.0017.1/48'&&area&&area.value;
+      details.push({pt,r,id,area,ok});
+      rowsEl.insertAdjacentHTML('beforeend',`<tr><td>${pt.x}, ${pt.y}</td><td>${r.status}</td><td>${id||'—'}</td><td>${area?area.name:'—'}</td><td>${area?area.value+' ha':'—'}</td><td class="${ok?'ok':'err'}">${ok?'OK':'BŁĄD'}</td></tr>`);
+    }
+    const all=details.every(d=>d.ok);
+    const vals=[...new Set(details.filter(d=>d.area).map(d=>d.area.value))];
+    if(all){statusEl.className='ok';statusEl.textContent='TEST ZALICZONY';summaryEl.innerHTML=`<p>Wszystkie 3 punkty wskazały działkę <b>281603_5.0017.1/48</b>.</p><p>EGiB zwróciło bezpośrednio: <span class="value">${vals.join(' / ')} ha</span></p><p>To jest wartość pobrana z atrybutu usługi. Tester nie wykonuje żadnych obliczeń ani zaokrągleń.</p>`}
+    else{statusEl.className='err';statusEl.textContent='TEST NIEZALICZONY';summaryEl.innerHTML='<p>Co najmniej jedno zapytanie nie zwróciło jednocześnie właściwej działki i pola powierzchni ewidencyjnej.</p>'}
+    rawEl.textContent=details.map((d,i)=>`===== PUNKT ${i+1}: ${d.pt.x},${d.pt.y} =====\nHTTP ${d.r.status}\nID_DZIALKI: ${d.id||'—'}\n${d.area?d.area.name+' = '+d.area.value:'BRAK ATRYBUTU POWIERZCHNI'}\n\n${d.r.text}`).join('\n\n');
+  }catch(e){statusEl.className='err';statusEl.textContent='BŁĄD: '+(e.message||e);rawEl.textContent=String(e&&e.stack||e)}
+  finally{btn.disabled=false}
+});
+</script>
+</body>
+</html>
