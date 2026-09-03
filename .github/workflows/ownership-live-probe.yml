@@ -1,0 +1,70 @@
+name: Ownership live probe
+on:
+  push:
+    paths:
+      - '.github/workflows/ownership-live-probe.yml'
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe GUGiK and e-mapa ownership WMS
+        shell: bash
+        run: |
+          set +e
+          G='https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci'
+          E='https://wms16.epodgik.pl/cgi-bin/Wlasnosc'
+          for pair in 'GUGIK|$G' 'EPOD|$E'; do
+            name="${pair%%|*}"; base="${pair#*|}"
+            echo "===== $name CAPABILITIES ====="
+            curl -L --max-time 60 -sS "$base?SERVICE=WMS&REQUEST=GetCapabilities" -o /tmp/cap.xml
+            echo "HTTP=$(curl -L --max-time 60 -sS -o /dev/null -w '%{http_code}' "$base?SERVICE=WMS&REQUEST=GetCapabilities")"
+            grep -oE '<Name>[^<]+' /tmp/cap.xml | head -60
+            echo '--- styles near ownership layers ---'
+            python3 - /tmp/cap.xml <<'PY'
+import sys,re
+s=open(sys.argv[1],errors='ignore').read()
+for m in re.finditer(r'<Layer[ >][\s\S]*?</Layer>',s):
+ b=m.group(0)
+ if any(x in b for x in ['<Name>dzialki</Name>','<Name>grupy</Name>','<Name>grupy_src</Name>','<Name>grupy_uzup</Name>']):
+  print(re.sub(r'\s+',' ',b)[:5000])
+PY
+            echo "===== $name GETMAP TESTS ====="
+            for srs in EPSG:4326 EPSG:3857 EPSG:2180; do
+              if [ "$srs" = EPSG:4326 ]; then bbox='21.70,53.50,21.90,53.70'; fi
+              if [ "$srs" = EPSG:3857 ]; then bbox='2419640,7080000,2441900,7110000'; fi
+              if [ "$srs" = EPSG:2180 ]; then bbox='700000,500000,715000,515000'; fi
+              layer='dzialki'; [ "$name" = EPOD ] && layer='grupy'
+              url="$base?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=$layer&STYLES=&SRS=$srs&BBOX=$bbox&WIDTH=800&HEIGHT=600&FORMAT=image/png&TRANSPARENT=TRUE"
+              curl -L --max-time 90 -sS -D /tmp/h -o /tmp/x.png "$url"
+              echo "$srs HTTP=$(grep -m1 '^HTTP/' /tmp/h) TYPE=$(grep -im1 '^content-type:' /tmp/h) SIZE=$(wc -c < /tmp/x.png) FILE=$(file -b /tmp/x.png)"
+              python3 - /tmp/x.png <<'PY'
+import sys,struct,zlib
+from collections import Counter
+p=sys.argv[1]; b=open(p,'rb').read()
+if b[:8]!=b'\x89PNG\r\n\x1a\n': print('not_png'); continue_flag=False; raise SystemExit
+pos=8; raw=b''
+while pos<len(b):
+ n=struct.unpack('>I',b[pos:pos+4])[0]; t=b[pos+4:pos+8]; d=b[pos+8:pos+8+n]; pos+=12+n
+ if t==b'IHDR': w,h,bd,ct,_,_,inter=struct.unpack('>IIBBBBB',d)
+ elif t==b'IDAT': raw+=d
+ elif t==b'IEND': break
+print('PNG',w,h,bd,ct,inter)
+if (bd,ct,inter)!=(8,6,0): raise SystemExit
+D=zlib.decompress(raw); stride=w*4; prev=bytearray(stride); off=0; c=Counter(); alpha=Counter()
+for y in range(h):
+ f=D[off]; off+=1; cur=bytearray(D[off:off+stride]); off+=stride
+ for i in range(stride):
+  a=cur[i-4] if i>=4 else 0; u=prev[i]; ul=prev[i-4] if i>=4 else 0
+  if f==1: cur[i]=(cur[i]+a)&255
+  elif f==2: cur[i]=(cur[i]+u)&255
+  elif f==3: cur[i]=(cur[i]+((a+u)//2))&255
+  elif f==4:
+   q=a+u-ul; pa=abs(q-a); pb=abs(q-u); pc=abs(q-ul); pr=a if pa<=pb and pa<=pc else (u if pb<=pc else ul); cur[i]=(cur[i]+pr)&255
+ for i in range(0,stride,4):
+  q=tuple(cur[i:i+4]); alpha[q[3]]+=1
+  if q[3]: c[q]+=1
+ prev=cur
+print('alpha',alpha.most_common(8),'top',c.most_common(12))
+PY
+            done
+          done
