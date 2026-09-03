@@ -1,1 +1,132 @@
-<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MAPA – tester numerów działek v9</title><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><style>html,body{height:100%;margin:0;font-family:Arial,sans-serif}#app{height:100%;display:flex}#panel{width:390px;min-width:390px;overflow:auto;padding:14px;box-sizing:border-box;background:#fff;border-right:1px solid #cbd5e1}#map{flex:1;height:100vh;background:#eee}.card{border:1px solid #cbd5e1;border-radius:8px;padding:11px;margin:10px 0}h1{font-size:19px;margin:0 0 4px}h2{font-size:14px;margin:0 0 8px}.sub{font-size:11px;color:#64748b;line-height:1.4}label{display:block;font-size:11px;font-weight:700;margin:7px 0 4px;color:#475569}input,select,button{width:100%;box-sizing:border-box;padding:8px;border:1px solid #cbd5e1;border-radius:7px;background:#fff}button{margin-top:7px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer}.secondary{background:#475569}.check{display:flex;gap:7px;align-items:center;font-size:12px;margin:7px 0}.check input{width:auto}.status{padding:8px;border-radius:7px;font-size:11px;margin-top:8px;background:#eff6ff;color:#1d4ed8}.ok{background:#f0fdf4;color:#166534}.err{background:#fef2f2;color:#991b1b}.stat{font:11px monospace;white-space:pre-wrap;line-height:1.45}.step{margin:3px 0}.step.ok{color:#166534}.step.err{color:#991b1b}.lbl{font-family:Arial,sans-serif;font-weight:600;color:#104e8b;white-space:nowrap;text-align:center;line-height:1;pointer-events:none;transform:translate(-50%,-50%);text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff}.vector-boundary{fill:none;stroke-width:1.2;opacity:.8}.legendLine{display:inline-block;width:22px;border-top:2px solid #2563eb;vertical-align:middle;margin-right:5px}.legendText{display:inline-block;width:22px;text-align:center;font-weight:700;color:#104e8b;margin-right:5px}@media(max-width:700px){#app{display:block}#panel{width:100%;min-width:0;height:48vh}#map{height:52vh}}</style></head><body><div id="app"><aside id="panel"><h1>Tester: numery działek v9</h1><div class="sub">Osobny tester. Produkcja (<b>index.html</b>) nie jest używana ani modyfikowana. WFS pobieramy przez backend Node.</div><div class="card"><h2>1. Działka testowa</h2><label>Identyfikator ULDK</label><input id="pid" value="281603_5.0017.1/48"><label>Zasięg WFS</label><select id="radius"><option value="100">100 m</option><option value="200">200 m</option><option value="300">300 m</option><option value="500">500 m</option></select><button id="load">Pobierz dane przez backend</button><button class="secondary" id="health">Test backendu</button><div id="status" class="status">Gotowy.</div></div><div class="card"><h2>2. Warstwy</h2><div class="check"><input id="wmsb" type="checkbox" checked><span><span class="legendLine"></span>WMS – granice</span></div><div class="check"><input id="wmsl" type="checkbox" checked><span><span class="legendText">12</span>WMS – numery</span></div><div class="check"><input id="html" type="checkbox" checked><span><span class="legendText">12</span>Backend WFS – HTML</span></div><div class="check"><input id="svg" type="checkbox" checked><span><span class="legendText">12</span>Backend WFS – SVG</span></div></div><div class="card"><h2>3. Skalowanie numerów</h2><label>Minimum px</label><input id="min" type="number" value="10"><label>Maksimum px</label><input id="max" type="number" value="16"><label>Przyrost / zoom</label><input id="scale" type="number" value="0.72" step="0.05"><label>Tryb</label><select id="mode"><option value="zoom">dynamiczny z zoomem</option><option value="screen">stały ekranowy</option></select><button class="secondary" id="fit">Przywróć widok</button></div><div class="card"><h2>4. Diagnostyka</h2><div id="steps" class="stat"></div><div id="stats" class="stat">Brak danych.</div></div></aside><main id="map"></main></div><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script><script>(()=>{const $=id=>document.getElementById(id),WMS='https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow',ULDK='https://uldk.gugik.gov.pl/';const map=L.map('map',{maxZoom:22}).setView([53.1,21.9],14);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:22,attribution:'© OpenStreetMap'}).addTo(map);const wb=L.tileLayer.wms(WMS,{layers:'dzialki',format:'image/png',transparent:true,opacity:.95,maxZoom:22}).addTo(map),wl=L.tileLayer.wms(WMS,{layers:'numery_dzialek',format:'image/png',transparent:true,opacity:.95,maxZoom:22}).addTo(map),html=L.layerGroup().addTo(map),svg=L.layerGroup().addTo(map),target=L.layerGroup().addTo(map);proj4.defs('EPSG:2180','+proj=tmerc +lat_0=0 +lon_0=19 +k=0.9993 +x_0=500000 +y_0=-5300000 +ellps=GRS80 +units=m +no_defs');let features=[],targetBounds=null;function status(t,c=''){ $('status').textContent=t;$('status').className='status '+c}function step(t,c='ok'){const d=document.createElement('div');d.className='step '+c;d.textContent=(c==='ok'?'✓ ':c==='err'?'✕ ':'… ')+t;$('steps').appendChild(d)}function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}function n(id){return Math.max(0,Number($(id).value)||0)}function fs(){return $('mode').value==='screen'?n('min'):Math.max(n('min'),Math.min(n('max'),n('min')+(map.getZoom()-13)*n('scale')))}function center(r){let A=0,cx=0,cy=0;for(let i=0,j=r.length-1;i<r.length;j=i++){let x0=r[j][1],y0=r[j][0],x1=r[i][1],y1=r[i][0],q=x0*y1-x1*y0;A+=q;cx+=(x0+x1)*q;cy+=(y0+y1)*q}return Math.abs(A)<1e-12?r[0]:[cy/(3*A),cx/(3*A)]}function parseGml(x){const d=new DOMParser().parseFromString(x,'application/xml');if(d.querySelector('parsererror'))throw Error('Nieprawidłowy XML/GML');const out=[];for(const m of [...d.getElementsByTagNameNS('http://www.opengis.net/wfs/2.0','member')]){const f=m.firstElementChild;if(!f)continue;let id='';for(const z of f.children)if(z.localName==='id_dzialki')id=z.textContent.trim();const g=[...f.children].find(z=>z.localName==='geom');if(!g)continue;const rings=[];for(const p of [...g.getElementsByTagNameNS('http://www.opengis.net/gml/3.2','posList')]){const a=p.textContent.trim().split(/\s+/).map(Number),r=[];for(let i=0;i+1<a.length;i+=2){const q=proj4('EPSG:2180','EPSG:4326',[a[i+1],a[i]]);if(Number.isFinite(q[0])&&Number.isFinite(q[1]))r.push([q[1],q[0]])}if(r.length>2)rings.push(r)}if(rings.length)out.push({id,rings})}return out}function label(ll,text,kind){const size=fs();let h;if(kind==='svg')h='<svg width="1" height="1" overflow="visible"><text x="0" y="0" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="600" font-size="'+size+'px" fill="#104e8b" stroke="#fff" stroke-width="2" paint-order="stroke">'+esc(text)+'</text></svg>';else h='<span>'+esc(text)+'</span>';return L.marker(ll,{interactive:false,icon:L.divIcon({className:'lbl',html:h,iconSize:[1,1],iconAnchor:[0,0]})})}function render(){html.clearLayers();svg.clearLayers();const size=fs();for(const f of features){const ll=center(f.rings[0]),text=String(f.id).split('.').pop();if($('html').checked)html.addLayer(label(ll,text,'html'));if($('svg').checked)svg.addLayer(label(ll,text,'svg'))}html.eachLayer(m=>m.getElement()?.style.setProperty('font-size',size+'px'));if($('wmsb').checked&&!map.hasLayer(wb))map.addLayer(wb);if(!$('wmsb').checked&&map.hasLayer(wb))map.removeLayer(wb);if($('wmsl').checked&&!map.hasLayer(wl))map.addLayer(wl);if(!$('wmsl').checked&&map.hasLayer(wl))map.removeLayer(wl)}async function load(){ $('steps').innerHTML='';status('Pobieram geometrię działki z ULDK…');try{const id=encodeURIComponent($('pid').value.trim()),r=await fetch(ULDK+'?request=GetParcelById&id='+id+'&result=geom_wkb&srid=4326');if(!r.ok)throw Error('ULDK HTTP '+r.status);const t=await r.text(),line=t.split(/\r?\n/).map(s=>s.trim()).find(s=>/^(?:[0-9a-f]{2}){20,}$/i.test(s));if(!line)throw Error('Brak WKB');const b=Uint8Array.from(line.match(/../g).map(x=>parseInt(x,16))),dv=new DataView(b.buffer);let o=0;const le=dv.getUint8(o++)===1;const rawType=dv.getUint32(o,le);o+=4;const hasSrid=(rawType&0x20000000)!==0;const typ=rawType&0x0fffffff;if(typ!==3)throw Error('Nieobsługiwany WKB '+rawType);if(hasSrid){const srid=dv.getUint32(o,le);o+=4;step('WKB zawiera SRID '+srid)}const nr=dv.getUint32(o,le);o+=4;const rings=[];for(let j=0;j<nr;j++){const k=dv.getUint32(o,le);o+=4;const rr=[];for(let i=0;i<k;i++){const x=dv.getFloat64(o,le),y=dv.getFloat64(o+8,le);o+=16;rr.push([y,x])}rings.push(rr)}target.clearLayers();target.addLayer(L.polygon(rings,{weight:3,fill:false}));targetBounds=L.latLngBounds(rings[0]);map.fitBounds(targetBounds.pad(.2));step('ULDK HTTP 200');step('WKB Polygon');step('geometria działki narysowana');const ll=targetBounds.getCenter(),xy=proj4('EPSG:4326','EPSG:2180',[ll.lng,ll.lat]),rad=n('radius');status('Backend → GUGiK WFS…');const q=await fetch('/api/wfs?lat='+ll.lat+'&lng='+ll.lng+'&x='+xy[0]+'&y='+xy[1]+'&radius='+rad,{cache:'no-store'}),tx=await q.text();if(!q.ok)throw Error('Backend/WFS HTTP '+q.status+' '+tx.slice(0,180));features=parseGml(tx);step('backend WFS HTTP '+q.status);step('WFS obiektów: '+features.length);if(!features.length)throw Error('WFS odpowiedział, ale nie zwrócił działek');$('stats').textContent='obiektów: '+features.length+'\nzoom: '+map.getZoom()+'\nrozmiar numerów: '+fs()+' px';render();status('Gotowe — WFS działa przez backend.','ok')}catch(e){status('BŁĄD: '+e.message,'err');step(e.message,'err')}}$('load').onclick=load;$('health').onclick=async()=>{try{const r=await fetch('/api/health');status(await r.text(),r.ok?'ok':'err')}catch(e){status('Backend niedostępny: '+e.message,'err')}};['wmsb','wmsl','html','svg','min','max','scale','mode'].forEach(id=>$(id).addEventListener('change',render));map.on('zoomend',()=>{if(features.length){render();$('stats').textContent='obiektów: '+features.length+'\nzoom: '+map.getZoom()+'\nrozmiar numerów: '+fs()+' px'}});$('fit').onclick=()=>targetBounds&&map.fitBounds(targetBounds.pad(.2));step('JavaScript uruchomiony');step('mapa Leaflet utworzona')})();</script></body></html>
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MAPA – tester numerów działek v9</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+html,body{height:100%;margin:0;font-family:Arial,sans-serif}#app{height:100%;display:flex}
+#panel{width:390px;min-width:390px;overflow:auto;padding:14px;box-sizing:border-box;background:#fff;border-right:1px solid #cbd5e1}
+#map{flex:1;height:100vh;background:#eee}.card{border:1px solid #cbd5e1;border-radius:8px;padding:11px;margin:10px 0}
+h1{font-size:19px;margin:0 0 4px}h2{font-size:14px;margin:0 0 8px}.sub{font-size:11px;color:#64748b;line-height:1.4}
+label{display:block;font-size:11px;font-weight:700;margin:7px 0 4px;color:#475569}input,select,button{width:100%;box-sizing:border-box;padding:8px;border:1px solid #cbd5e1;border-radius:7px;background:#fff}
+button{margin-top:7px;background:#2563eb;color:#fff;font-weight:700;cursor:pointer}.secondary{background:#475569}.check{display:flex;gap:7px;align-items:center;font-size:12px;margin:7px 0}.check input{width:auto}
+.status{padding:8px;border-radius:7px;font-size:11px;margin-top:8px;background:#eff6ff;color:#1d4ed8}.ok{background:#f0fdf4;color:#166534}.err{background:#fef2f2;color:#991b1b}
+.stat{font:11px monospace;white-space:pre-wrap;line-height:1.45}.step{margin:3px 0}.step.ok{color:#166534}.step.err{color:#991b1b}
+/* Etykieta jest pozycjonowana przez Leaflet, a centrowanie robimy na elemencie WEWNĘTRZNYM.
+   Dzięki temu nie kolidujemy z inline transformem, którym Leaflet przesuwa marker. */
+.parcel-label{pointer-events:none;z-index:1000!important;width:max-content!important;height:max-content!important;background:transparent!important;border:0!important}
+.parcel-label-inner{display:block;position:relative;left:0;top:0;transform:translate(-50%,-50%);font-family:Arial,sans-serif;font-weight:600;color:#104e8b;white-space:nowrap;text-align:center;line-height:1;text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff}
+.parcel-label-svg{display:block;overflow:visible}
+.legendLine{display:inline-block;width:22px;border-top:2px solid #2563eb;vertical-align:middle;margin-right:5px}.legendText{display:inline-block;width:22px;text-align:center;font-weight:700;color:#104e8b;margin-right:5px}
+@media(max-width:700px){#app{display:block}#panel{width:100%;min-width:0;height:48vh}#map{height:52vh}}
+</style>
+</head>
+<body>
+<div id="app"><aside id="panel">
+<h1>Tester: numery działek v9</h1>
+<div class="sub">Osobny tester. Produkcja (<b>index.html</b>) nie jest używana ani modyfikowana. WFS pobieramy przez backend Node.</div>
+<div class="card"><h2>1. Działka testowa</h2>
+<label>Identyfikator ULDK</label><input id="pid" value="281603_5.0017.1/48">
+<label>Zasięg WFS</label><select id="radius"><option value="100">100 m</option><option value="200">200 m</option><option value="300">300 m</option><option value="500">500 m</option></select>
+<button id="load">Pobierz dane przez backend</button><button class="secondary" id="health">Test backendu</button><div id="status" class="status">Gotowy.</div>
+</div>
+<div class="card"><h2>2. Warstwy</h2>
+<div class="check"><input id="wmsb" type="checkbox" checked><span><span class="legendLine"></span>WMS – granice</span></div>
+<div class="check"><input id="wmsl" type="checkbox" checked><span><span class="legendText">12</span>WMS – numery</span></div>
+<div class="check"><input id="html" type="checkbox" checked><span><span class="legendText">12</span>Backend WFS – HTML</span></div>
+<div class="check"><input id="svg" type="checkbox" checked><span><span class="legendText">12</span>Backend WFS – SVG</span></div>
+<div class="check"><input id="wfsb" type="checkbox"><span><span class="legendLine"></span>Backend WFS – granice</span></div>
+</div>
+<div class="card"><h2>3. Skalowanie numerów</h2>
+<label>Minimum px</label><input id="min" type="number" value="10"><label>Maksimum px</label><input id="max" type="number" value="16"><label>Przyrost / zoom</label><input id="scale" type="number" value="0.72" step="0.05">
+<label>Tryb</label><select id="mode"><option value="zoom">dynamiczny z zoomem</option><option value="screen">stały ekranowy</option></select>
+<button class="secondary" id="fit">Przywróć widok</button></div>
+<div class="card"><h2>4. Diagnostyka</h2><div id="steps" class="stat"></div><div id="stats" class="stat">Brak danych.</div></div>
+</aside><main id="map"></main></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
+<script>
+(()=>{
+const $=id=>document.getElementById(id),WMS='https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow',ULDK='https://uldk.gugik.gov.pl/';
+const map=L.map('map',{maxZoom:22}).setView([53.1,21.9],14);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:22,attribution:'© OpenStreetMap'}).addTo(map);
+const wb=L.tileLayer.wms(WMS,{layers:'dzialki',format:'image/png',transparent:true,opacity:.95,maxZoom:22}).addTo(map);
+const wl=L.tileLayer.wms(WMS,{layers:'numery_dzialek',format:'image/png',transparent:true,opacity:.95,maxZoom:22}).addTo(map);
+const html=L.layerGroup().addTo(map),svg=L.layerGroup().addTo(map),wfsb=L.layerGroup().addTo(map),target=L.layerGroup().addTo(map);
+proj4.defs('EPSG:2180','+proj=tmerc +lat_0=0 +lon_0=19 +k=0.9993 +x_0=500000 +y_0=-5300000 +ellps=GRS80 +units=m +no_defs');
+let features=[],targetBounds=null;
+function status(t,c=''){ $('status').textContent=t;$('status').className='status '+c }
+function step(t,c='ok'){const d=document.createElement('div');d.className='step '+c;d.textContent=(c==='ok'?'✓ ':c==='err'?'✕ ':'… ')+t;$('steps').appendChild(d)}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function n(id){return Math.max(0,Number($(id).value)||0)}
+function fs(){return $('mode').value==='screen'?n('min'):Math.max(n('min'),Math.min(n('max'),n('min')+(map.getZoom()-13)*n('scale')))}
+function center(r){
+ let A=0,cx=0,cy=0;
+ for(let i=0,j=r.length-1;i<r.length;j=i++){
+  const x0=r[j][1],y0=r[j][0],x1=r[i][1],y1=r[i][0],q=x0*y1-x1*y0;
+  A+=q;cx+=(x0+x1)*q;cy+=(y0+y1)*q;
+ }
+ return Math.abs(A)<1e-12?r[0]:[cy/(3*A),cx/(3*A)];
+}
+function parseGml(x){
+ const d=new DOMParser().parseFromString(x,'application/xml');
+ if(d.querySelector('parsererror'))throw Error('Nieprawidłowy XML/GML');
+ const out=[];
+ for(const m of [...d.getElementsByTagNameNS('http://www.opengis.net/wfs/2.0','member')]){
+  const f=m.firstElementChild;if(!f)continue;let id='';
+  for(const z of f.children)if(z.localName==='id_dzialki')id=z.textContent.trim();
+  const g=[...f.children].find(z=>z.localName==='geom');if(!g)continue;
+  const rings=[];
+  for(const p of [...g.getElementsByTagNameNS('http://www.opengis.net/gml/3.2','posList')]){
+   const a=p.textContent.trim().split(/\s+/).map(Number),r=[];
+   for(let i=0;i+1<a.length;i+=2){const q=proj4('EPSG:2180','EPSG:4326',[a[i+1],a[i]]);if(Number.isFinite(q[0])&&Number.isFinite(q[1]))r.push([q[1],q[0]])}
+   if(r.length>2)rings.push(r);
+  }
+  if(rings.length)out.push({id,rings});
+ }
+ return out;
+}
+function label(ll,text,kind){
+ const size=fs();
+ if(kind==='svg'){
+  const h='<svg class="parcel-label-svg" width="1" height="1" overflow="visible"><text x="0" y="0" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="600" font-size="'+size+'px" fill="#104e8b" stroke="#fff" stroke-width="2" paint-order="stroke">'+esc(text)+'</text></svg>';
+  return L.marker(ll,{interactive:false,pane:'markerPane',icon:L.divIcon({className:'parcel-label',html:h,iconSize:[1,1],iconAnchor:[0,0]})});
+ }
+ const h='<span class="parcel-label-inner" style="font-size:'+size+'px">'+esc(text)+'</span>';
+ return L.marker(ll,{interactive:false,pane:'markerPane',icon:L.divIcon({className:'parcel-label',html:h,iconSize:[1,1],iconAnchor:[0,0]})});
+}
+function render(){
+ html.clearLayers();svg.clearLayers();wfsb.clearLayers();
+ const size=fs();let htmlCount=0,svgCount=0,boundaryCount=0;
+ for(const f of features){
+  const ll=center(f.rings[0]),text=String(f.id||'').split('.').pop();
+  if($('wfsb').checked){wfsb.addLayer(L.polygon(f.rings,{color:'#f59e0b',weight:1,fill:false,interactive:false}));boundaryCount++}
+  if($('html').checked&&text){html.addLayer(label(ll,text,'html'));htmlCount++}
+  if($('svg').checked&&text){svg.addLayer(label(ll,text,'svg'));svgCount++}
+ }
+ if($('wmsb').checked&&!map.hasLayer(wb))map.addLayer(wb);if(!$('wmsb').checked&&map.hasLayer(wb))map.removeLayer(wb);
+ if($('wmsl').checked&&!map.hasLayer(wl))map.addLayer(wl);if(!$('wmsl').checked&&map.hasLayer(wl))map.removeLayer(wl);
+ if($('wfsb').checked&&!map.hasLayer(wfsb))map.addLayer(wfsb);if(!$('wfsb').checked&&map.hasLayer(wfsb))map.removeLayer(wfsb);
+ $('stats').textContent='obiektów WFS: '+features.length+'\nnumery HTML: '+htmlCount+'\nnumery SVG: '+svgCount+'\ngranice WFS: '+boundaryCount+'\nzoom: '+map.getZoom()+'\nrozmiar numerów: '+size.toFixed(2)+' px'+(features[0]?'\nprzykładowy ID: '+features[0].id:'');
+}
+async function load(){
+ $('steps').innerHTML='';$('stats').textContent='Brak danych.';status('Pobieram geometrię działki z ULDK…');
+ try{
+  const id=encodeURIComponent($('pid').value.trim()),r=await fetch(ULDK+'?request=GetParcelById&id='+id+'&result=geom_wkb&srid=4326');
+  if(!r.ok)throw Error('ULDK HTTP '+r.status);const t=await r.text(),line=t.split(/\r?\n/).map(s=>s.trim()).find(s=>/^(?:[0-9a-f]{2}){20,}$/i.test(s));if(!line)throw Error('Brak WKB');
+  const b=Uint8Array.from(line.match(/../g).map(x=>parseInt(x,16))),dv=new DataView(b.buffer);let o=0;const le=dv.getUint8(o++)===1,rawType=dv.getUint32(o,le);o+=4;const hasSrid=(rawType&0x20000000)!==0,typ=rawType&0x0fffffff;if(typ!==3)throw Error('Nieobsługiwany WKB '+rawType);if(hasSrid){const srid=dv.getUint32(o,le);o+=4;step('WKB zawiera SRID '+srid)}
+  const nr=dv.getUint32(o,le),rings=[];o+=4;for(let j=0;j<nr;j++){const k=dv.getUint32(o,le);o+=4;const rr=[];for(let i=0;i<k;i++){const x=dv.getFloat64(o,le),y=dv.getFloat64(o+8,le);o+=16;rr.push([y,x])}rings.push(rr)}
+  target.clearLayers();target.addLayer(L.polygon(rings,{weight:3,fill:false,color:'#2563eb'}));targetBounds=L.latLngBounds(rings[0]);map.fitBounds(targetBounds.pad(.2));step('ULDK HTTP 200');step('WKB Polygon');step('geometria działki narysowana');
+  const ll=targetBounds.getCenter(),xy=proj4('EPSG:4326','EPSG:2180',[ll.lng,ll.lat]),rad=n('radius');status('Backend → GUGiK WFS…');
+  const q=await fetch('/api/wfs?lat='+ll.lat+'&lng='+ll.lng+'&x='+xy[0]+'&y='+xy[1]+'&radius='+rad,{cache:'no-store'}),tx=await q.text();if(!q.ok)throw Error('Backend/WFS HTTP '+q.status+' '+tx.slice(0,180));
+  features=parseGml(tx);step('backend WFS HTTP '+q.status);step('WFS obiektów: '+features.length);if(!features.length)throw Error('WFS odpowiedział, ale nie zwrócił działek');render();status('Gotowe — WFS działa przez backend.','ok');
+ }catch(e){status('BŁĄD: '+e.message,'err');step(e.message,'err')}
+}
+$('load').onclick=load;$('health').onclick=async()=>{try{const r=await fetch('/api/health');status(await r.text(),r.ok?'ok':'err')}catch(e){status('Backend niedostępny: '+e.message,'err')}};
+['wmsb','wmsl','html','svg','wfsb','min','max','scale','mode'].forEach(id=>$(id).addEventListener('change',render));
+map.on('zoomend',()=>{if(features.length)render()});$('fit').onclick=()=>targetBounds&&map.fitBounds(targetBounds.pad(.2));
+step('JavaScript uruchomiony');step('mapa Leaflet utworzona');
+})();
+</script>
+</body></html>
