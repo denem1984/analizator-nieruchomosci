@@ -10,34 +10,51 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Probe
+      - name: Probe exact Leaflet WMS request
         shell: bash
         run: |
           set +e
           : > ownership-live-result.txt
-          echo "DATE=$(date -u +%FT%TZ)" >> ownership-live-result.txt
-          echo "GUGIK CAPABILITIES" >> ownership-live-result.txt
-          curl -L --max-time 60 -sS 'https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci?SERVICE=WMS&REQUEST=GetCapabilities' -o /tmp/g.xml
-          echo "http=$(curl -L --max-time 60 -sS -o /dev/null -w '%{http_code}' 'https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci?SERVICE=WMS&REQUEST=GetCapabilities')" >> ownership-live-result.txt
-          grep -oE '<Name>[^<]+' /tmp/g.xml | head -30 >> ownership-live-result.txt
-          echo "GUGIK GETMAP 4326" >> ownership-live-result.txt
-          curl -L --max-time 90 -sS -D /tmp/g.h -o /tmp/g.png 'https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=dzialki&STYLES=&SRS=EPSG:4326&BBOX=21.70,53.50,21.90,53.70&WIDTH=800&HEIGHT=600&FORMAT=image/png&TRANSPARENT=TRUE'
-          grep -Ei '^(HTTP/|content-type:|content-length:)' /tmp/g.h >> ownership-live-result.txt
-          file /tmp/g.png >> ownership-live-result.txt
-          identify /tmp/g.png >> ownership-live-result.txt 2>&1
-          convert /tmp/g.png -format '%c' histogram:info:- 2>/dev/null | sort -nr | head -15 >> ownership-live-result.txt
-          echo "EPOD CAPABILITIES" >> ownership-live-result.txt
-          curl -L --max-time 60 -sS 'https://wms16.epodgik.pl/cgi-bin/Wlasnosc?SERVICE=WMS&REQUEST=GetCapabilities' -o /tmp/e.xml
-          echo "http=$(curl -L --max-time 60 -sS -o /dev/null -w '%{http_code}' 'https://wms16.epodgik.pl/cgi-bin/Wlasnosc?SERVICE=WMS&REQUEST=GetCapabilities')" >> ownership-live-result.txt
-          grep -oE '<Name>[^<]+' /tmp/e.xml | head -30 >> ownership-live-result.txt
-          echo "EPOD GETMAP grupy 4326" >> ownership-live-result.txt
-          curl -L --max-time 90 -sS -D /tmp/e.h -o /tmp/e.png 'https://wms16.epodgik.pl/cgi-bin/Wlasnosc?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=grupy&STYLES=&SRS=EPSG:4326&BBOX=21.70,53.50,21.90,53.70&WIDTH=800&HEIGHT=600&FORMAT=image/png&TRANSPARENT=TRUE'
-          grep -Ei '^(HTTP/|content-type:|content-length:)' /tmp/e.h >> ownership-live-result.txt
-          file /tmp/e.png >> ownership-live-result.txt
-          identify /tmp/e.png >> ownership-live-result.txt 2>&1
-          convert /tmp/e.png -format '%c' histogram:info:- 2>/dev/null | sort -nr | head -15 >> ownership-live-result.txt
+          URL='https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=dzialki&STYLES=&SRS=EPSG:3857&BBOX=2410000,7030000,2440000,7060000&WIDTH=800&HEIGHT=600&FORMAT=image/png&TRANSPARENT=TRUE'
+          curl -L --max-time 90 -sS -D /tmp/h -o /tmp/x.png "$URL"
+          echo "HTTP=$(grep -m1 '^HTTP/' /tmp/h)" >> ownership-live-result.txt
+          echo "TYPE=$(grep -im1 '^content-type:' /tmp/h)" >> ownership-live-result.txt
+          echo "SIZE=$(wc -c < /tmp/x.png)" >> ownership-live-result.txt
+          echo "FILE=$(file -b /tmp/x.png)" >> ownership-live-result.txt
+          python3 - /tmp/x.png >> ownership-live-result.txt <<'PY'
+import sys,struct,zlib
+from collections import Counter
+p=sys.argv[1]; b=open(p,'rb').read()
+print('signature',b[:8])
+if b[:8]!=b'\x89PNG\r\n\x1a\n': raise SystemExit
+pos=8; raw=b''
+while pos<len(b):
+ n=struct.unpack('>I',b[pos:pos+4])[0]; t=b[pos+4:pos+8]; d=b[pos+8:pos+8+n]; pos+=12+n
+ if t==b'IHDR': w,h,bd,ct,_,_,inter=struct.unpack('>IIBBBBB',d)
+ elif t==b'IDAT': raw+=d
+ elif t==b'IEND': break
+print('PNG',w,h,bd,ct,inter)
+if (bd,ct,inter)!=(8,6,0): raise SystemExit
+D=zlib.decompress(raw); stride=w*4; prev=bytearray(stride); off=0; c=Counter(); alpha=Counter()
+for y in range(h):
+ f=D[off]; off+=1; cur=bytearray(D[off:off+stride]); off+=stride
+ for i in range(stride):
+  a=cur[i-4] if i>=4 else 0; u=prev[i]; ul=prev[i-4] if i>=4 else 0
+  if f==1: cur[i]=(cur[i]+a)&255
+  elif f==2: cur[i]=(cur[i]+u)&255
+  elif f==3: cur[i]=(cur[i]+((a+u)//2))&255
+  elif f==4:
+   q=a+u-ul; pa=abs(q-a); pb=abs(q-u); pc=abs(q-ul); pr=a if pa<=pb and pa<=pc else (u if pb<=pc else ul); cur[i]=(cur[i]+pr)&255
+ for i in range(0,stride,4):
+  q=tuple(cur[i:i+4]); alpha[q[3]]+=1
+  if q[3]: c[q]+=1
+ prev=cur
+print('alpha',alpha.most_common(10))
+print('nontransparent',sum(c.values()),'of',w*h)
+print('top_rgba',c.most_common(20))
+PY
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add ownership-live-result.txt
-          git commit -m 'Record ownership WMS live probe' || true
+          git commit -m 'Record exact ownership WMS response' || true
           git push
