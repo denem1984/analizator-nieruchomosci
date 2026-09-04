@@ -1,0 +1,48 @@
+name: Fix map layers
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/fix-map-layers.yml'
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch index.html
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+          old='document.getElementById("own").addEventListener("change",e=>{if(e.target.checked){if(map.hasLayer(layers.kieg))layers.kieg.setOpacity(0)}else{layers.kieg.setOpacity(.95)}});'
+          if old not in s:
+              raise SystemExit('ownership opacity listener not found')
+          s=s.replace(old,'')
+          old='own:L.tileLayer.wms("https://analizator-nieruchomosci-api.onrender.com/api/ownership",{pane:"overlayPaneApp",layers:"dzialki",format:"image/png",transparent:true,opacity:1,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1})'
+          new='own:L.tileLayer.wms("https://analizator-nieruchomosci-api.onrender.com/api/ownership",{pane:"overlayPaneApp",layers:"dzialki",styles:"default",format:"image/png",transparent:true,opacity:1,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1})'
+          if old not in s:
+              raise SystemExit('ownership layer definition not found')
+          s=s.replace(old,new)
+          old='async function loadParcelLabels(){if(!document.getElementById("kieg").checked||map.getZoom()<13){clearParcelLabels();if(map.hasLayer(parcelLabelsWms))map.removeLayer(parcelLabelsWms);return}'
+          new='async function loadParcelLabels(){if(map.getZoom()<13){clearParcelLabels();if(map.hasLayer(parcelLabelsWms))map.removeLayer(parcelLabelsWms);return}if(document.getElementById("kieg").checked&&!map.hasLayer(parcelLabelsWms))map.addLayer(parcelLabelsWms)'
+          if old not in s:
+              raise SystemExit('loadParcelLabels header not found')
+          s=s.replace(old,new)
+          old='document.getElementById("kieg").addEventListener("change",e=>{if(e.target.checked)scheduleParcelLabels();else{clearParcelLabels();if(map.hasLayer(parcelLabelsWms))map.removeLayer(parcelLabelsWms)}});'
+          new='document.getElementById("kieg").addEventListener("change",e=>{if(e.target.checked){if(map.getZoom()>=13&&!map.hasLayer(parcelLabelsWms))map.addLayer(parcelLabelsWms);scheduleParcelLabels()}else{clearParcelLabels();if(map.hasLayer(parcelLabelsWms))map.removeLayer(parcelLabelsWms)}});'
+          if old not in s:
+              raise SystemExit('kieg change handler not found')
+          s=s.replace(old,new)
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html
+          git commit -m 'Restore parcel labels and ownership layer styling'
+          git push
