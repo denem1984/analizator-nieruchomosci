@@ -5,7 +5,7 @@ const {PNG}=require('pngjs');
 const PORT=process.env.PORT||10000;
 const WFS='https://mapy.geoportal.gov.pl/wss/service/PZGIK/EGIB/WFS/UslugaZbiorcza';
 const OWNERSHIP_WMS='https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci';
-const PISKI_WFS='https://powiatpiski.geoportal2.pl/map/geoportal/wfs.php';
+const PISKI_WFS='https://powiatpiski.geoportal2.pl/map/geoportal/wfse.php';
 const CRS2180='+proj=tmerc +lat_0=0 +lon_0=19 +k=0.9993 +x_0=500000 +y_0=-5300000 +ellps=GRS80 +units=m +no_defs +type=crs';
 proj4.defs('EPSG:2180',CRS2180);
 function send(res,status,type,body){res.writeHead(status,{'Content-Type':type,'Cache-Control':'no-store','Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,OPTIONS'});res.end(body)}
