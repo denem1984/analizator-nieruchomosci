@@ -1,0 +1,34 @@
+DATE=2026-09-03T16:00:09Z
+GUGIK CAPABILITIES
+http=200
+<Name>WMS
+<Name>dzialki_stats
+<Name>default
+<Name>dzialki_stats_pan_polygon
+<Name>default
+<Name>dzialki_stats_woj_polygon
+<Name>dzialki_stats_pow_polygon
+<Name>dzialki
+<Name>default
+<Name>dzialki_prev
+<Name>default
+<Name>dzialki_polygon
+GUGIK GETMAP 4326
+HTTP/1.1 200 OK
+Content-Type: image/png
+/tmp/g.png: PNG image data, 800 x 600, 8-bit/color RGBA, non-interlaced
+/home/runner/work/_temp/0d8540a7-bff2-43d9-84a9-ccf8f6606497.sh: line 12: identify: command not found
+EPOD CAPABILITIES
+http=200
+<Name>WMS
+<Name>grupy
+<Name>default
+<Name>grupy_src
+<Name>default
+<Name>grupy_uzup
+<Name>default
+EPOD GETMAP grupy 4326
+HTTP/2 200 
+content-type: image/png
+/tmp/e.png: PNG image data, 600 x 300, 8-bit/color RGBA, non-interlaced
+/home/runner/work/_temp/0d8540a7-bff2-43d9-84a9-ccf8f6606497.sh: line 22: identify: command not found
