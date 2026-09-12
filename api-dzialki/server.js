@@ -178,4 +178,87 @@ async function wfs(reqUrl,res){
   const u=new URL(reqUrl,'http://localhost');
   const rawBbox=u.searchParams.get('bbox');
   const parts=String(rawBbox||'').split(',').slice(0,4).map(Number);
-  if(parts.length!==4||parts.some(v=>!Number.isFinite(v)))return send(res,400,'application/json; charset=utf-8',JSON.stringify({error:'Nieprawidłowy bbox EPSG:43
+  if(parts.length!==4||parts.some(v=>!Number.isFinite(v)))return send(res,400,'application/json; charset=utf-8',JSON.stringify({error:'Nieprawidłowy bbox EPSG:4326.'}));
+  const[south,west,north,east]=parts;
+  const b=bbox2180(rawBbox);
+  if(!b)return send(res,400,'application/json; charset=utf-8',JSON.stringify({error:'Nieprawidłowy bbox EPSG:4326.'}));
+
+  // POPRAWKA #1: GUGiK WFS (ms:dzialki) zaczął odrzucać zapytania w formacie
+  // fes:Filter/gml:Envelope ("InvalidParameterValue" / "Unsupported FILTER").
+  // Używamy prostszego, standardowego parametru BBOX (WFS 2.0.0), tak jak już
+  // działa to w funkcji ownershipCounty() w tym samym pliku.
+  //
+  // POPRAWKA #2: nie wiadomo z góry, czy serwer oczekuje kolejności X,Y czy
+  // Y,X — a co gorsza, przy błędnej kolejności serwer NIE zwraca błędu, tylko
+  // po cichu podaje działki z zupełnie innego miejsca w Polsce. Dlatego po
+  // otrzymaniu odpowiedzi sprawdzamy (inBounds), czy zwrócone działki faktycznie
+  // leżą w żądanym obszarze mapy. Jeśli nie — automatycznie próbujemy drugiej
+  // kolejności współrzędnych, zanim cokolwiek odeślemy do przeglądarki.
+  // Front-end i mechanizm rysowania etykiet pozostają bez zmian.
+
+  function inBounds(data){
+    if(!data||!Array.isArray(data.features)||!data.features.length)return false;
+    const f=data.features[0];
+    let c=f&&f.geometry&&f.geometry.coordinates;
+    while(Array.isArray(c)&&Array.isArray(c[0]))c=c[0];
+    if(!Array.isArray(c)||typeof c[0]!=='number'||typeof c[1]!=='number')return false;
+    const[lon,lat]=c;
+    const padLat=Math.max(north-south,0.05),padLon=Math.max(east-west,0.05);
+    return lon>=west-padLon&&lon<=east+padLon&&lat>=south-padLat&&lat<=north+padLat;
+  }
+
+  async function attempt(bboxStr,axisLabel){
+    const target=new URL(WFS);
+    for(const[k,v]of Object.entries({
+      service:'WFS',
+      version:'2.0.0',
+      request:'GetFeature',
+      typenames:'ms:dzialki',
+      srsName:'EPSG:2180',
+      bbox:bboxStr,
+      startIndex:'0',
+      count:'1000',
+      propertyName:'id_dzialki,geom'
+    }))target.searchParams.set(k,v);
+    console.log('WFS_BBOX_ATTEMPT',JSON.stringify({axisOrder:axisLabel,bbox:bboxStr}));
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),170000);
+    try{
+      const r=await fetch(target.href,{signal:controller.signal,headers:{'User-Agent':'MAPA production parcel labels/2.4','Accept':'application/json,text/json,application/xml,text/xml,*/*'}});
+      const text=await r.text();
+      clearTimeout(timer);
+      const ct=(r.headers.get('content-type')||'').toLowerCase();
+      const isException=/<(?:ows:)?ExceptionReport\b/i.test(text)||/InvalidParameterValue/i.test(text);
+      let data=null;
+      if(!isException){
+        if(ct.includes('json')){
+          try{data=normalizeJsonGeoJson(JSON.parse(text))}catch(e){console.error('WFS_JSON_PARSE_ERROR',e.message)}
+        }else if(r.ok&&/<(?:wfs:)?FeatureCollection\b/i.test(text)){
+          data=parseGml(text);
+        }
+      }
+      const valid=data&&inBounds(data);
+      console.log('WFS_RESPONSE',JSON.stringify({axisOrder:axisLabel,status:r.status,contentType:ct,bytes:text.length,hasData:!!data,featureCount:data?.features?.length??0,inBounds:valid,preview:text.slice(0,180)}));
+      return{ok:!!data,valid:!!valid,status:r.status,ct,text,data};
+    }catch(e){
+      clearTimeout(timer);
+      return{ok:false,valid:false,error:e.name==='AbortError'?'GUGiK WFS przekroczył limit 170 s.':e.message};
+    }
+  }
+
+  const bboxXY=`${b.minX.toFixed(2)},${b.minY.toFixed(2)},${b.maxX.toFixed(2)},${b.maxY.toFixed(2)}`;
+  const bboxYX=`${b.minY.toFixed(2)},${b.minX.toFixed(2)},${b.maxY.toFixed(2)},${b.maxX.toFixed(2)}`;
+
+  let out=await attempt(bboxXY,'X,Y');
+  if(!out.valid){
+    const out2=await attempt(bboxYX,'Y,X');
+    if(out2.valid)out=out2;
+    else if(out2.ok&&!out.ok)out=out2;
+  }
+
+  if(out.ok&&out.data)return send(res,200,'application/json; charset=utf-8',JSON.stringify(out.data));
+  if(out.error)return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:out.error}));
+  return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'WFS nie zwrócił danych GeoJSON/GML.',status:out.status,contentType:out.ct,preview:(out.text||'').slice(0,500)}));
+}
+
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
