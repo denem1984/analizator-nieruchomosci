@@ -89,7 +89,7 @@ async function scanGrupaRejestrowa(reqUrl,res){
   // prywatnej listy - to bezpośrednio oficjalny rejestr rządowy.
   const u=new URL(reqUrl,'http://localhost');
   const offset=parseInt(u.searchParams.get('offset')||'0',10);
-  const limit=Math.min(parseInt(u.searchParams.get('limit')||'40',10),60);
+  const limit=Math.min(parseInt(u.searchParams.get('limit')||'30',10),60);
   const deadlineMs=Date.now()+110000; // twardy limit czasu jednego wywołania
 
   async function fetchJson(url,timeoutMs){
@@ -127,7 +127,7 @@ async function scanGrupaRejestrowa(reqUrl,res){
     const capUrl=new URL(entry.wfsUrl);
     capUrl.searchParams.set('SERVICE','WFS');
     capUrl.searchParams.set('REQUEST','GetCapabilities');
-    const cap=await fetchJson(capUrl.href,7000);
+    const cap=await fetchJson(capUrl.href,12000);
     if(cap.status!==200||!cap.text)return{...entry,ok:false,reason:'capabilities_failed'};
     const nameMatch=Array.from(cap.text.matchAll(/<(?:wfs:)?Name>([^<]*dzialk[^<]*)<\/(?:wfs:)?Name>/gi)).map(m=>m[1]);
     const layerName=nameMatch[0];
@@ -141,15 +141,15 @@ async function scanGrupaRejestrowa(reqUrl,res){
     descUrl.searchParams.set('VERSION',version);
     descUrl.searchParams.set('REQUEST','DescribeFeatureType');
     descUrl.searchParams.set(version.startsWith('1.')?'typeName':'typeNames',layerName);
-    const desc=await fetchJson(descUrl.href,7000);
+    const desc=await fetchJson(descUrl.href,12000);
     if(desc.status!==200||!desc.text)return{...entry,ok:false,layerName,reason:'describe_failed'};
-    const fields=Array.from(desc.text.matchAll(/<xsd:element\s+[^>]*name=["']([^"']+)["']/gi)).map(m=>m[1]);
+    const fields=Array.from(desc.text.matchAll(/<(?:[\w]+:)?element\s+[^>]*\bname=["']([^"']+)["']/gi)).map(m=>m[1]).filter(f=>!/^(?:sequence|complexType|complexContent|extension|restriction)$/i.test(f));
     const grupaField=fields.find(f=>/grupa|rejestr/i.test(f));
     return{...entry,ok:true,layerName,fieldCount:fields.length,hasGrupaRejestrowa:!!grupaField,grupaFieldName:grupaField||null};
   }
 
   // Przetwarzanie z ograniczoną równoległością (żeby nie zalać serwerów powiatowych)
-  const concurrency=8;
+  const concurrency=5;
   let i=0;
   async function worker(){
     while(i<batch.length&&Date.now()<deadlineMs){
