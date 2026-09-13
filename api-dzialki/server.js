@@ -160,14 +160,18 @@ async function scanGrupaRejestrowa(reqUrl,res){
   await Promise.all(Array.from({length:concurrency},worker));
 
   const withGrupa=results.filter(r=>r.hasGrupaRejestrowa);
+  const verbose=u.searchParams.get('verbose')==='1';
+  const failReasons={};
+  for(const r of results){if(!r.ok){failReasons[r.reason]=(failReasons[r.reason]||0)+1}}
   const summary={
     totalPowiatowWRejestrzeGugik:allEntries.length,
     sprawdzonoWTymWywolaniu:results.length,
-    offset,limit,
-    nextOffset:offset+limit<allEntries.length?offset+limit:null,
+    offset,
+    nextOffset:offset+results.length<allEntries.length?offset+results.length:null,
     znalezionoGrupeRejestrowa:withGrupa.length,
+    powodyNiepowodzen:failReasons,
     listaZGrupaRejestrowa:withGrupa.map(r=>({teryt:r.teryt,organ:r.organ,wfsUrl:r.wfsUrl,layerName:r.layerName,grupaFieldName:r.grupaFieldName})),
-    szczegoly:results
+    ...(verbose?{szczegoly:results}:{})
   };
   return send(res,200,'application/json; charset=utf-8',JSON.stringify(summary,null,2));
 }
