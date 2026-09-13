@@ -89,7 +89,7 @@ async function scanGrupaRejestrowa(reqUrl,res){
   // prywatnej listy - to bezpośrednio oficjalny rejestr rządowy.
   const u=new URL(reqUrl,'http://localhost');
   const offset=parseInt(u.searchParams.get('offset')||'0',10);
-  const limit=Math.min(parseInt(u.searchParams.get('limit')||'30',10),60);
+  const limit=Math.min(parseInt(u.searchParams.get('limit')||'400',10),762);
   const deadlineMs=Date.now()+110000; // twardy limit czasu jednego wywołania
 
   async function fetchJson(url,timeoutMs){
