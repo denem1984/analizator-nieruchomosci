@@ -113,11 +113,20 @@ async function scanGrupaRejestrowa(reqUrl,res){
     return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'Błąd parsowania rejestru EZiUDP.',details:e.message}));
   }
 
-  const allEntries=(registry.data||[]).map(e=>{
+  const allEntriesRaw=(registry.data||[]).map(e=>{
     const pob=(e.uslugi&&e.uslugi.pobierania)||[];
     const wfsUrl=pob.map(s=>String(s).replace(/^WFS=/i,'')).find(s=>/^https?:\/\//i.test(s));
     return{teryt:e.teryt,organ:e.organ,zbior:e.zbior,wfsUrl};
   }).filter(e=>e.wfsUrl);
+  // Deduplikacja po TERYT: rejestr GUGiK zawiera często dwa wpisy dla tego
+  // samego powiatu (stara i nowa rejestracja usługi) - zostawiamy jeden,
+  // żeby liczyć POWIATY, a nie WPISY W REJESTRZE.
+  const seenTeryt=new Set();
+  const allEntries=allEntriesRaw.filter(e=>{
+    if(seenTeryt.has(e.teryt))return false;
+    seenTeryt.add(e.teryt);
+    return true;
+  });
 
   const batch=allEntries.slice(offset,offset+limit);
   const results=[];
