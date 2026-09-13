@@ -80,6 +80,98 @@ async function mapaWlasnosciCapabilities(res){
   }
 }
 
+async function scanGrupaRejestrowa(reqUrl,res){
+  // NARZĘDZIE JEDNORAZOWE: sprawdza, ile polskich powiatów faktycznie
+  // udostępnia pole "grupa rejestrowa" w swojej usłudze WFS działek.
+  // Źródło listy powiatów: oficjalne, publiczne API GUGiK (Ewidencja Zbiorów
+  // i Usług Danych Przestrzennych) - https://integracja.gugik.gov.pl/eziudp/
+  // Temat 1.6 = "działki ewidencji gruntów". Nie korzystamy z żadnej cudzej,
+  // prywatnej listy - to bezpośrednio oficjalny rejestr rządowy.
+  const u=new URL(reqUrl,'http://localhost');
+  const offset=parseInt(u.searchParams.get('offset')||'0',10);
+  const limit=Math.min(parseInt(u.searchParams.get('limit')||'40',10),60);
+  const deadlineMs=Date.now()+110000; // twardy limit czasu jednego wywołania
+
+  async function fetchJson(url,timeoutMs){
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
+    try{
+      const r=await fetch(url,{signal:controller.signal,headers:{'User-Agent':'MAPA scan-grupa-rejestrowa/1.0','Accept':'application/json,text/xml,application/xml,*/*'}});
+      const text=await r.text();
+      return{status:r.status,text};
+    }catch(e){
+      return{status:0,error:e.name==='AbortError'?'timeout':e.message};
+    }finally{clearTimeout(timer)}
+  }
+
+  // Krok 1: pobierz listę usług "pobierania" dla tematu 1.6 (działki) z oficjalnego API GUGiK
+  let registry;
+  try{
+    const regRes=await fetchJson('https://integracja.gugik.gov.pl/eziudp/api.php?temat=1.6&usluga=pobierania',20000);
+    if(regRes.status!==200)return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'Nie udało się pobrać rejestru EZiUDP GUGiK.',details:regRes}));
+    registry=JSON.parse(regRes.text);
+  }catch(e){
+    return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'Błąd parsowania rejestru EZiUDP.',details:e.message}));
+  }
+
+  const allEntries=(registry.data||[]).map(e=>{
+    const pob=(e.uslugi&&e.uslugi.pobierania)||[];
+    const wfsUrl=pob.map(s=>String(s).replace(/^WFS=/i,'')).find(s=>/^https?:\/\//i.test(s));
+    return{teryt:e.teryt,organ:e.organ,zbior:e.zbior,wfsUrl};
+  }).filter(e=>e.wfsUrl);
+
+  const batch=allEntries.slice(offset,offset+limit);
+  const results=[];
+
+  async function checkOne(entry){
+    // 1) GetCapabilities - znajdź nazwę warstwy zawierającej "dzialk"
+    const capUrl=new URL(entry.wfsUrl);
+    capUrl.searchParams.set('SERVICE','WFS');
+    capUrl.searchParams.set('REQUEST','GetCapabilities');
+    const cap=await fetchJson(capUrl.href,7000);
+    if(cap.status!==200||!cap.text)return{...entry,ok:false,reason:'capabilities_failed'};
+    const nameMatch=Array.from(cap.text.matchAll(/<(?:wfs:)?Name>([^<]*dzialk[^<]*)<\/(?:wfs:)?Name>/gi)).map(m=>m[1]);
+    const layerName=nameMatch[0];
+    if(!layerName)return{...entry,ok:false,reason:'no_dzialki_layer'};
+    const versionMatch=cap.text.match(/version=["']?(\d\.\d\.\d)/i);
+    const version=versionMatch?versionMatch[1]:'2.0.0';
+
+    // 2) DescribeFeatureType - sprawdź listę pól
+    const descUrl=new URL(entry.wfsUrl);
+    descUrl.searchParams.set('SERVICE','WFS');
+    descUrl.searchParams.set('VERSION',version);
+    descUrl.searchParams.set('REQUEST','DescribeFeatureType');
+    descUrl.searchParams.set(version.startsWith('1.')?'typeName':'typeNames',layerName);
+    const desc=await fetchJson(descUrl.href,7000);
+    if(desc.status!==200||!desc.text)return{...entry,ok:false,layerName,reason:'describe_failed'};
+    const fields=Array.from(desc.text.matchAll(/<xsd:element\s+[^>]*name=["']([^"']+)["']/gi)).map(m=>m[1]);
+    const grupaField=fields.find(f=>/grupa|rejestr/i.test(f));
+    return{...entry,ok:true,layerName,fieldCount:fields.length,hasGrupaRejestrowa:!!grupaField,grupaFieldName:grupaField||null};
+  }
+
+  // Przetwarzanie z ograniczoną równoległością (żeby nie zalać serwerów powiatowych)
+  const concurrency=8;
+  let i=0;
+  async function worker(){
+    while(i<batch.length&&Date.now()<deadlineMs){
+      const entry=batch[i++];
+      results.push(await checkOne(entry));
+    }
+  }
+  await Promise.all(Array.from({length:concurrency},worker));
+
+  const withGrupa=results.filter(r=>r.hasGrupaRejestrowa);
+  const summary={
+    totalPowiatowWRejestrzeGugik:allEntries.length,
+    sprawdzonoWTymWywolaniu:results.length,
+    offset,limit,
+    nextOffset:offset+limit<allEntries.length?offset+limit:null,
+    znalezionoGrupeRejestrowa:withGrupa.length,
+    listaZGrupaRejestrowa:withGrupa.map(r=>({teryt:r.teryt,organ:r.organ,wfsUrl:r.wfsUrl,layerName:r.layerName,grupaFieldName:r.grupaFieldName})),
+    szczegoly:results
+  };
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify(summary,null,2));
+}
+
 async function ownershipCounty(reqUrl,res){
   const u=new URL(reqUrl,'http://localhost');
   const rawBbox=u.searchParams.get('bbox');
@@ -260,5 +352,5 @@ async function wfs(reqUrl,res){
   return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'WFS nie zwrócił danych GeoJSON/GML.',status:out.status,contentType:out.ct,preview:(out.text||'').slice(0,500)}));
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
