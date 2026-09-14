@@ -302,6 +302,7 @@ async function fetchOwnershipData(config,south,west,north,east,cachedMode){
     return lon>=west-padLon&&lon<=east+padLon&&lat>=south-padLat&&lat<=north+padLat;
   }
 
+  const attemptLog=[];
   async function attempt(mode){
     const target=new URL(config.wfsUrl);
     const params={service:'WFS',version:config.version,request:'GetFeature',startIndex:'0',count:'1000'};
@@ -312,33 +313,32 @@ async function fetchOwnershipData(config,south,west,north,east,cachedMode){
       bboxStr=`${south},${west},${north},${east}`;
     }else{
       const b=bbox2180(`${south},${west},${north},${east}`);
-      if(!b)return{ok:false};
+      if(!b){attemptLog.push({mode,error:'bbox2180_failed'});return{ok:false}}
       params.srsName='EPSG:2180';
       bboxStr=mode==='srs2180-xy'?`${b.minX.toFixed(2)},${b.minY.toFixed(2)},${b.maxX.toFixed(2)},${b.maxY.toFixed(2)}`:`${b.minY.toFixed(2)},${b.minX.toFixed(2)},${b.maxY.toFixed(2)},${b.maxX.toFixed(2)}`;
     }
     params.bbox=bboxStr;
     for(const[k,v]of Object.entries(params))target.searchParams.set(k,v);
     const res=await fetchText(target.href,15000);
-    if(res.status!==200||!res.text)return{ok:false};
-    if(/<(?:ows:)?ExceptionReport\b/i.test(res.text)||/InvalidParameterValue/i.test(res.text))return{ok:false};
-    if(!/<(?:wfs:)?FeatureCollection\b/i.test(res.text))return{ok:false};
+    if(res.status!==200||!res.text){attemptLog.push({mode,status:res.status,error:res.error||'http_error'});return{ok:false}}
+    if(/<(?:ows:)?ExceptionReport\b/i.test(res.text)||/InvalidParameterValue/i.test(res.text)){attemptLog.push({mode,status:res.status,error:'exception_report',preview:res.text.slice(0,200)});return{ok:false}}
+    if(!/<(?:wfs:)?FeatureCollection\b/i.test(res.text)){attemptLog.push({mode,status:res.status,error:'not_feature_collection',contentTypePreview:res.text.slice(0,150)});return{ok:false}}
     data=mode.startsWith('srs4326')?parseGmlGeneric(res.text,config.idField,config.grupaField,mode==='srs4326-latlon'):parseGmlGeneric2180(res.text,config.idField,config.grupaField);
-    return{ok:true,data,valid:inBounds(data)};
+    const valid=inBounds(data);
+    attemptLog.push({mode,status:res.status,featureCount:data.features.length,inBounds:valid});
+    return{ok:true,data,valid};
   }
 
-  // Jeśli znamy już działający tryb dla tego powiatu - użyj go od razu (szybka ścieżka)
   if(cachedMode){
     const r=await attempt(cachedMode);
-    if(r.ok&&r.valid)return{data:r.data,workingMode:cachedMode};
+    if(r.ok&&r.valid)return{data:r.data,workingMode:cachedMode,attemptLog};
   }
-  // W przeciwnym razie (albo pierwsze zapytanie dla tego powiatu, albo
-  // zapamiętany tryb przestał działać) - sprawdź po kolei możliwe warianty.
   for(const mode of['srs4326-latlon','srs4326-lonlat','srs2180-xy','srs2180-yx']){
     if(mode===cachedMode)continue;
     const r=await attempt(mode);
-    if(r.ok&&r.valid)return{data:r.data,workingMode:mode};
+    if(r.ok&&r.valid)return{data:r.data,workingMode:mode,attemptLog};
   }
-  return{data:null,workingMode:null};
+  return{data:null,workingMode:null,attemptLog};
 }
 
 async function ownershipLive(reqUrl,res){
@@ -365,13 +365,13 @@ async function ownershipLive(reqUrl,res){
     return send(res,200,'application/json; charset=utf-8',JSON.stringify({available:false,teryt:terytPowiatu,reason:config.reason}));
   }
 
-  const{data,workingMode}=await fetchOwnershipData(config,south,west,north,east,config.workingMode);
+  const{data,workingMode,attemptLog}=await fetchOwnershipData(config,south,west,north,east,config.workingMode);
   if(workingMode&&workingMode!==config.workingMode){
     config.workingMode=workingMode;
     powiatConfigCache.set(terytPowiatu,config);
   }
 
-  if(!data)return send(res,200,'application/json; charset=utf-8',JSON.stringify({available:false,teryt:terytPowiatu,reason:'query_failed'}));
+  if(!data)return send(res,200,'application/json; charset=utf-8',JSON.stringify({available:false,teryt:terytPowiatu,reason:'query_failed',wfsUrl:config.wfsUrl,layerName:config.layerName,attemptLog}));
   return send(res,200,'application/json; charset=utf-8',JSON.stringify(data));
 }
 
