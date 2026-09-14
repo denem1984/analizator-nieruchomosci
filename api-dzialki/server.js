@@ -185,6 +185,196 @@ async function scanGrupaRejestrowa(reqUrl,res){
   return send(res,200,'application/json; charset=utf-8',JSON.stringify(summary,null,2));
 }
 
+// ============================================================
+// UNIWERSALNA MAPA WŁASNOŚCI - działa dla DOWOLNEGO powiatu w Polsce,
+// na żywo, bez wcześniej zapisanej listy. Cache przechowuje TYLKO
+// "jak rozmawiać z serwerem danego powiatu" (adres, nazwa warstwy,
+// nazwa pola grupy rejestrowej, sposób zapytania) - NIGDY same dane
+// o działkach. Dzięki temu dane własności są zawsze pobierane na
+// żywo, zgodnie ze stanem faktycznym na dzień analizy, a mechanizm
+// jest szybki przy powtórnych zapytaniach dla tego samego powiatu.
+// Cache żyje tylko w pamięci procesu - znika przy restarcie/redeployu.
+// ============================================================
+const powiatConfigCache=new Map();
+const POWIAT_CACHE_TTL_MS=1000*60*60*12; // 12h - odświeży się samo, gdyby serwer powiatu zmienił konfigurację
+
+function extractFieldValue(member,fieldName){
+  const esc=fieldName.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const re=new RegExp(`<(?:[\\w]+:)?${esc}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w]+:)?${esc}>`,'i');
+  const m=member.match(re);
+  return m?xmlDecode(m[1]):null;
+}
+
+function parseGmlGeneric(text,idField,grupaField,latLonOrder){
+  const features=[];
+  const members=text.match(/<wfs:member\b[\s\S]*?<\/wfs:member>/gi)||[];
+  for(const member of members){
+    const id=idField?extractFieldValue(member,idField):null;
+    const group=grupaField?extractFieldValue(member,grupaField):null;
+    const rings=[];
+    const re=/<gml:(?:exterior|interior)\b[\s\S]*?<gml:posList\b[^>]*>([\s\S]*?)<\/gml:posList>[\s\S]*?<\/gml:(?:exterior|interior)>/gi;
+    let m;
+    while((m=re.exec(member))){const ring=ringFromPosList4326(m[1],latLonOrder);if(ring)rings.push(ring)}
+    if(!rings.length)continue;
+    features.push({type:'Feature',properties:{id_dzialki:id,GRUPA_REJESTROWA:group},geometry:{type:'Polygon',coordinates:rings}});
+  }
+  return{type:'FeatureCollection',features};
+}
+
+function parseGmlGeneric2180(text,idField,grupaField){
+  const features=[];
+  const members=text.match(/<wfs:member\b[\s\S]*?<\/wfs:member>/gi)||[];
+  for(const member of members){
+    const id=idField?extractFieldValue(member,idField):null;
+    const group=grupaField?extractFieldValue(member,grupaField):null;
+    const rings=[];
+    const re=/<gml:(?:exterior|interior)\b[\s\S]*?<gml:posList\b[^>]*>([\s\S]*?)<\/gml:posList>[\s\S]*?<\/gml:(?:exterior|interior)>/gi;
+    let m;
+    while((m=re.exec(member))){const ring=ringFromPosList(m[1]);if(ring)rings.push(ring)}
+    if(!rings.length)continue;
+    features.push({type:'Feature',properties:{id_dzialki:id,GRUPA_REJESTROWA:group},geometry:{type:'Polygon',coordinates:rings}});
+  }
+  return{type:'FeatureCollection',features};
+}
+
+async function fetchText(url,timeoutMs){
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{
+    const r=await fetch(url,{signal:controller.signal,headers:{'User-Agent':'MAPA ownership-live/1.0','Accept':'application/json,text/xml,application/xml,*/*'}});
+    const text=await r.text();
+    return{status:r.status,text};
+  }catch(e){
+    return{status:0,error:e.name==='AbortError'?'timeout':e.message};
+  }finally{clearTimeout(timer)}
+}
+
+// Krok 1: dla danego TERYT ustala adres WFS + nazwę warstwy + nazwę pola
+// grupy rejestrowej (dokładnie ta sama logika, co w skrypcie skanującym
+// całą Polskę - tu robimy to tylko dla JEDNEGO, potrzebnego teraz powiatu).
+async function discoverPowiatConfig(teryt){
+  const regRes=await fetchText(`https://integracja.gugik.gov.pl/eziudp/api.php?teryt=${encodeURIComponent(teryt)}&temat=1.6&usluga=pobierania`,15000);
+  if(regRes.status!==200)return{ok:false,reason:'eziudp_failed'};
+  let registry;
+  try{registry=JSON.parse(regRes.text)}catch(e){return{ok:false,reason:'eziudp_parse_failed'}}
+  const entry=(registry.data||[])[0];
+  const pob=(entry&&entry.uslugi&&entry.uslugi.pobierania)||[];
+  const wfsUrl=pob.map(s=>String(s).replace(/^WFS=/i,'')).find(s=>/^https?:\/\//i.test(s));
+  if(!wfsUrl)return{ok:false,reason:'no_wfs_in_registry'};
+
+  const capUrl=new URL(wfsUrl);
+  capUrl.searchParams.set('SERVICE','WFS');
+  capUrl.searchParams.set('REQUEST','GetCapabilities');
+  const cap=await fetchText(capUrl.href,12000);
+  if(cap.status!==200||!cap.text)return{ok:false,reason:'capabilities_failed',wfsUrl};
+  const nameMatch=Array.from(cap.text.matchAll(/<(?:wfs:)?Name>([^<]*dzialk[^<]*)<\/(?:wfs:)?Name>/gi)).map(m=>m[1]);
+  const layerName=nameMatch[0];
+  if(!layerName)return{ok:false,reason:'no_dzialki_layer',wfsUrl};
+  const versionMatch=cap.text.match(/version=["']?(\d\.\d\.\d)/i);
+  const version=versionMatch?versionMatch[1]:'2.0.0';
+
+  const descUrl=new URL(wfsUrl);
+  descUrl.searchParams.set('SERVICE','WFS');
+  descUrl.searchParams.set('VERSION',version);
+  descUrl.searchParams.set('REQUEST','DescribeFeatureType');
+  descUrl.searchParams.set(version.startsWith('1.')?'typeName':'typeNames',layerName);
+  const desc=await fetchText(descUrl.href,12000);
+  if(desc.status!==200||!desc.text)return{ok:false,reason:'describe_failed',wfsUrl,layerName};
+  const fields=Array.from(desc.text.matchAll(/<(?:[\w]+:)?element\s+[^>]*\bname=["']([^"']+)["']/gi)).map(m=>m[1]).filter(f=>!/^(?:sequence|complexType|complexContent|extension|restriction)$/i.test(f));
+  const grupaField=fields.find(f=>/grupa|rejestr/i.test(f));
+  if(!grupaField)return{ok:false,reason:'no_grupa_field',wfsUrl,layerName,fields};
+  const idField=fields.find(f=>/id.*dzialk|dzialk.*id/i.test(f))||fields.find(f=>/numer.*dzialk/i.test(f));
+
+  return{ok:true,wfsUrl,layerName,version,idField,grupaField};
+}
+
+// Krok 2: mając już config (z cache albo świeżo odkryty), pobiera AKTUALNE
+// dane działek dla żądanego obszaru mapy. To zapytanie wykonuje się ZA
+// KAŻDYM razem na żywo - nigdy nie jest cache'owane.
+async function fetchOwnershipData(config,south,west,north,east,cachedMode){
+  function inBounds(data){
+    if(!data||!Array.isArray(data.features)||!data.features.length)return false;
+    const f=data.features[0];
+    let c=f&&f.geometry&&f.geometry.coordinates;
+    while(Array.isArray(c)&&Array.isArray(c[0]))c=c[0];
+    if(!Array.isArray(c)||typeof c[0]!=='number'||typeof c[1]!=='number')return false;
+    const[lon,lat]=c;
+    const padLat=Math.max(north-south,0.05),padLon=Math.max(east-west,0.05);
+    return lon>=west-padLon&&lon<=east+padLon&&lat>=south-padLat&&lat<=north+padLat;
+  }
+
+  async function attempt(mode){
+    const target=new URL(config.wfsUrl);
+    const params={service:'WFS',version:config.version,request:'GetFeature',startIndex:'0',count:'1000'};
+    params[config.version.startsWith('1.')?'typeName':'typeNames']=config.layerName;
+    let bboxStr,data=null;
+    if(mode==='srs4326-latlon'||mode==='srs4326-lonlat'){
+      params.srsName='EPSG:4326';
+      bboxStr=`${south},${west},${north},${east}`;
+    }else{
+      const b=bbox2180(`${south},${west},${north},${east}`);
+      if(!b)return{ok:false};
+      params.srsName='EPSG:2180';
+      bboxStr=mode==='srs2180-xy'?`${b.minX.toFixed(2)},${b.minY.toFixed(2)},${b.maxX.toFixed(2)},${b.maxY.toFixed(2)}`:`${b.minY.toFixed(2)},${b.minX.toFixed(2)},${b.maxY.toFixed(2)},${b.maxX.toFixed(2)}`;
+    }
+    params.bbox=bboxStr;
+    for(const[k,v]of Object.entries(params))target.searchParams.set(k,v);
+    const res=await fetchText(target.href,15000);
+    if(res.status!==200||!res.text)return{ok:false};
+    if(/<(?:ows:)?ExceptionReport\b/i.test(res.text)||/InvalidParameterValue/i.test(res.text))return{ok:false};
+    if(!/<(?:wfs:)?FeatureCollection\b/i.test(res.text))return{ok:false};
+    data=mode.startsWith('srs4326')?parseGmlGeneric(res.text,config.idField,config.grupaField,mode==='srs4326-latlon'):parseGmlGeneric2180(res.text,config.idField,config.grupaField);
+    return{ok:true,data,valid:inBounds(data)};
+  }
+
+  // Jeśli znamy już działający tryb dla tego powiatu - użyj go od razu (szybka ścieżka)
+  if(cachedMode){
+    const r=await attempt(cachedMode);
+    if(r.ok&&r.valid)return{data:r.data,workingMode:cachedMode};
+  }
+  // W przeciwnym razie (albo pierwsze zapytanie dla tego powiatu, albo
+  // zapamiętany tryb przestał działać) - sprawdź po kolei możliwe warianty.
+  for(const mode of['srs4326-latlon','srs4326-lonlat','srs2180-xy','srs2180-yx']){
+    if(mode===cachedMode)continue;
+    const r=await attempt(mode);
+    if(r.ok&&r.valid)return{data:r.data,workingMode:mode};
+  }
+  return{data:null,workingMode:null};
+}
+
+async function ownershipLive(reqUrl,res){
+  const u=new URL(reqUrl,'http://localhost');
+  const teryt=(u.searchParams.get('teryt')||'').trim();
+  const rawBbox=u.searchParams.get('bbox');
+  const parts=String(rawBbox||'').split(',').slice(0,4).map(Number);
+  if(!teryt)return send(res,400,'application/json; charset=utf-8',JSON.stringify({error:'Brak parametru teryt.'}));
+  if(parts.length!==4||parts.some(v=>!Number.isFinite(v)))return send(res,400,'application/json; charset=utf-8',JSON.stringify({error:'Nieprawidłowy bbox EPSG:4326.'}));
+  const[south,west,north,east]=parts;
+
+  // Powiat "piski" (281603) i podobne mogą mieć TERYT powiatu podany jako
+  // pełne 6 cyfr z gminy - rejestr EZiU oczekuje kodu POWIATU (4 cyfry).
+  const terytPowiatu=teryt.length>=4?teryt.slice(0,4):teryt;
+
+  let config=powiatConfigCache.get(terytPowiatu);
+  if(!config||Date.now()-config.discoveredAt>POWIAT_CACHE_TTL_MS){
+    const discovered=await discoverPowiatConfig(terytPowiatu);
+    config={...discovered,discoveredAt:Date.now(),workingMode:null};
+    powiatConfigCache.set(terytPowiatu,config);
+  }
+
+  if(!config.ok){
+    return send(res,200,'application/json; charset=utf-8',JSON.stringify({available:false,teryt:terytPowiatu,reason:config.reason}));
+  }
+
+  const{data,workingMode}=await fetchOwnershipData(config,south,west,north,east,config.workingMode);
+  if(workingMode&&workingMode!==config.workingMode){
+    config.workingMode=workingMode;
+    powiatConfigCache.set(terytPowiatu,config);
+  }
+
+  if(!data)return send(res,200,'application/json; charset=utf-8',JSON.stringify({available:false,teryt:terytPowiatu,reason:'query_failed'}));
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify(data));
+}
+
 async function ownershipCounty(reqUrl,res){
   const u=new URL(reqUrl,'http://localhost');
   const rawBbox=u.searchParams.get('bbox');
@@ -365,5 +555,5 @@ async function wfs(reqUrl,res){
   return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'WFS nie zwrócił danych GeoJSON/GML.',status:out.status,contentType:out.ct,preview:(out.text||'').slice(0,500)}));
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
