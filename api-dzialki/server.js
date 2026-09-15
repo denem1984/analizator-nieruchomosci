@@ -344,6 +344,27 @@ async function fetchOwnershipData(config,south,west,north,east,cachedMode){
   return{data:null,workingMode:null,attemptLog};
 }
 
+async function probePowiat(reqUrl,res){
+  const u=new URL(reqUrl,'http://localhost');
+  const teryt=(u.searchParams.get('teryt')||'').trim().slice(0,4);
+  if(!teryt)return send(res,400,'application/json; charset=utf-8',JSON.stringify({error:'Brak teryt.'}));
+  const config=await discoverPowiatConfig(teryt);
+  if(!config.ok)return send(res,200,'application/json; charset=utf-8',JSON.stringify({config}));
+
+  const target=new URL(config.wfsUrl);
+  const params={service:'WFS',version:config.version,request:'GetFeature',count:'3'};
+  params[config.version.startsWith('1.')?'typeName':'typeNames']=config.layerName;
+  for(const[k,v]of Object.entries(params))target.searchParams.set(k,v);
+  const res1=await fetchText(target.href,15000);
+
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify({
+    config,
+    noBboxRequestUrl:target.href,
+    noBboxStatus:res1.status,
+    noBboxPreview:(res1.text||res1.error||'').slice(0,2500)
+  },null,2));
+}
+
 async function ownershipLive(reqUrl,res){
   const u=new URL(reqUrl,'http://localhost');
   const teryt=(u.searchParams.get('teryt')||'').trim();
@@ -558,5 +579,5 @@ async function wfs(reqUrl,res){
   return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'WFS nie zwrócił danych GeoJSON/GML.',status:out.status,contentType:out.ct,preview:(out.text||'').slice(0,500)}));
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
