@@ -389,19 +389,29 @@ async function probePowiat(reqUrl,res){
   const config=await discoverPowiatConfig(teryt);
   if(!config.ok)return send(res,200,'application/json; charset=utf-8',JSON.stringify({config}));
 
-  const target=new URL(config.wfsUrl);
-  const params={service:'WFS',version:config.version,request:'GetFeature',count:'3'};
-  params[config.version.startsWith('1.')?'typeName':'typeNames']=config.layerName;
-  for(const[k,v]of Object.entries(params))target.searchParams.set(k,v);
-  const res1=await fetchText(target.href,15000);
+  async function tryUrl(label,extraParams){
+    const target=new URL(config.wfsUrl);
+    const params={service:'WFS',version:config.version,request:'GetFeature',count:'3',...extraParams};
+    params[config.version.startsWith('1.')?'typeName':'typeNames']=config.layerName;
+    for(const[k,v]of Object.entries(params))target.searchParams.set(k,v);
+    const r=await fetchText(target.href,20000);
+    const featureCount=(r.text.match(/<gml:featureMember>/gi)||[]).length;
+    return{label,requestUrl:target.href,status:r.status,featureCount,preview:r.text.slice(0,600)};
+  }
 
-  return send(res,200,'application/json; charset=utf-8',JSON.stringify({
-    config,
-    noBboxRequestUrl:target.href,
-    noBboxStatus:res1.status,
-    noBboxPreview:(res1.text||res1.error||'').slice(0,2500)
-  },null,2));
+  const results=[];
+  // Test 1: brak bbox w ogóle (kontrola - powinno działać, sprawdzone już wcześniej)
+  results.push(await tryUrl('bez_bbox',{}));
+  // Test 2: OGROMNY obszar (cała Polska) w natywnym układzie 2178 - sprawdza,
+  // czy mechanizm bbox w ogóle cokolwiek zwraca, niezależnie od precyzji
+  results.push(await tryUrl('ogromny_bbox_2178',{srsName:'EPSG:2178',bbox:'7000000,5400000,8200000,5900000'}));
+  // Test 3: układ dopisany wprost do parametru bbox (starszy, alternatywny zapis WFS 1.1.0)
+  results.push(await tryUrl('bbox_z_crs_w_parametrze',{bbox:'5786215.27,7480009.28,5786660.31,7480273.58,EPSG:2178'}));
+
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify({config,results},null,2));
 }
+
+
 
 async function ownershipLive(reqUrl,res){
   const u=new URL(reqUrl,'http://localhost');
