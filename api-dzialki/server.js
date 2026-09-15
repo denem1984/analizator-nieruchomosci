@@ -320,12 +320,12 @@ async function fetchOwnershipData(config,south,west,north,east,cachedMode){
     params.bbox=bboxStr;
     for(const[k,v]of Object.entries(params))target.searchParams.set(k,v);
     const res=await fetchText(target.href,15000);
-    if(res.status!==200||!res.text){attemptLog.push({mode,status:res.status,error:res.error||'http_error'});return{ok:false}}
-    if(/<(?:ows:)?ExceptionReport\b/i.test(res.text)||/InvalidParameterValue/i.test(res.text)){attemptLog.push({mode,status:res.status,error:'exception_report',preview:res.text.slice(0,200)});return{ok:false}}
-    if(!/<(?:wfs:)?FeatureCollection\b/i.test(res.text)){attemptLog.push({mode,status:res.status,error:'not_feature_collection',contentTypePreview:res.text.slice(0,150)});return{ok:false}}
+    if(res.status!==200||!res.text){attemptLog.push({mode,bboxSent:bboxStr,status:res.status,error:res.error||'http_error'});return{ok:false}}
+    if(/<(?:ows:)?ExceptionReport\b/i.test(res.text)||/InvalidParameterValue/i.test(res.text)){attemptLog.push({mode,bboxSent:bboxStr,status:res.status,error:'exception_report',preview:res.text.slice(0,300)});return{ok:false}}
+    if(!/<(?:wfs:)?FeatureCollection\b/i.test(res.text)){attemptLog.push({mode,bboxSent:bboxStr,status:res.status,error:'not_feature_collection',contentTypePreview:res.text.slice(0,150)});return{ok:false}}
     data=mode.startsWith('srs4326')?parseGmlGeneric(res.text,config.idField,config.grupaField,mode==='srs4326-latlon'):parseGmlGeneric2180(res.text,config.idField,config.grupaField);
     const valid=inBounds(data);
-    attemptLog.push({mode,status:res.status,featureCount:data.features.length,inBounds:valid});
+    attemptLog.push({mode,bboxSent:bboxStr,requestUrl:target.href,status:res.status,featureCount:data.features.length,inBounds:valid,rawPreview:data.features.length?undefined:res.text.slice(0,400)});
     return{ok:true,data,valid};
   }
 
