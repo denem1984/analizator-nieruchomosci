@@ -308,9 +308,12 @@ async function fetchOwnershipData(config,south,west,north,east,cachedMode){
     const params={service:'WFS',version:config.version,request:'GetFeature',startIndex:'0',count:'1000'};
     params[config.version.startsWith('1.')?'typeName':'typeNames']=config.layerName;
     let bboxStr,data=null;
-    if(mode==='srs4326-latlon'||mode==='srs4326-lonlat'){
+    if(mode==='srs4326-latlon'){
       params.srsName='EPSG:4326';
       bboxStr=`${south},${west},${north},${east}`;
+    }else if(mode==='srs4326-lonlat'){
+      params.srsName='EPSG:4326';
+      bboxStr=`${west},${south},${east},${north}`;
     }else{
       const b=bbox2180(`${south},${west},${north},${east}`);
       if(!b){attemptLog.push({mode,error:'bbox2180_failed'});return{ok:false}}
