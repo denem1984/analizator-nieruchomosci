@@ -201,7 +201,8 @@ async function scanGrupaRejestrowa(reqUrl,res){
 // Cache żyje tylko w pamięci procesu - znika przy restarcie/redeployu.
 // ============================================================
 const powiatConfigCache=new Map();
-const POWIAT_CACHE_TTL_MS=1000*60*60*12; // 12h - odświeży się samo, gdyby serwer powiatu zmienił konfigurację
+const POWIAT_CACHE_TTL_MS=1000*60*60*12; // 12h dla UDANEGO odkrycia konfiguracji - rzadko się zmienia
+const POWIAT_CACHE_FAIL_TTL_MS=1000*60*2; // 2 min dla NIEUDANEGO - to może być chwilowa awaria serwera powiatu, nie chcemy blokować na 12h
 
 function extractFieldValue(member,fieldName){
   const esc=fieldName.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
@@ -269,7 +270,7 @@ async function discoverPowiatConfig(teryt){
   const capUrl=new URL(wfsUrl);
   capUrl.searchParams.set('SERVICE','WFS');
   capUrl.searchParams.set('REQUEST','GetCapabilities');
-  const cap=await fetchText(capUrl.href,12000);
+  const cap=await fetchText(capUrl.href,18000);
   if(cap.status!==200||!cap.text)return{ok:false,reason:'capabilities_failed',wfsUrl};
   const nameMatch=Array.from(cap.text.matchAll(/<(?:wfs:)?Name>([^<]*dzialk[^<]*)<\/(?:wfs:)?Name>/gi)).map(m=>m[1]);
   const layerName=nameMatch[0];
@@ -282,7 +283,7 @@ async function discoverPowiatConfig(teryt){
   descUrl.searchParams.set('VERSION',version);
   descUrl.searchParams.set('REQUEST','DescribeFeatureType');
   descUrl.searchParams.set(version.startsWith('1.')?'typeName':'typeNames',layerName);
-  const desc=await fetchText(descUrl.href,12000);
+  const desc=await fetchText(descUrl.href,18000);
   if(desc.status!==200||!desc.text)return{ok:false,reason:'describe_failed',wfsUrl,layerName};
   const fields=Array.from(desc.text.matchAll(/<(?:[\w]+:)?element\s+[^>]*\bname=["']([^"']+)["']/gi)).map(m=>m[1]).filter(f=>!/^(?:sequence|complexType|complexContent|extension|restriction)$/i.test(f));
   const grupaField=fields.find(f=>/grupa|rejestr/i.test(f));
@@ -432,7 +433,7 @@ async function ownershipLive(reqUrl,res){
   const terytPowiatu=teryt.length>=4?teryt.slice(0,4):teryt;
 
   let config=powiatConfigCache.get(terytPowiatu);
-  if(!config||Date.now()-config.discoveredAt>POWIAT_CACHE_TTL_MS){
+  if(!config||Date.now()-config.discoveredAt>(config.ok?POWIAT_CACHE_TTL_MS:POWIAT_CACHE_FAIL_TTL_MS)){
     const discovered=await discoverPowiatConfig(terytPowiatu);
     config={...discovered,discoveredAt:Date.now(),workingMode:null};
     powiatConfigCache.set(terytPowiatu,config);
