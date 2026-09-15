@@ -8,6 +8,11 @@ const OWNERSHIP_WMS='https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci';
 const PISKI_WFS='https://powiatpiski.geoportal2.pl/map/geoportal/wfs.php';
 const CRS2180='+proj=tmerc +lat_0=0 +lon_0=19 +k=0.9993 +x_0=500000 +y_0=-5300000 +ellps=GRS80 +units=m +no_defs +type=crs';
 proj4.defs('EPSG:2180',CRS2180);
+// EPSG:2178 - regionalny układ PL-2000 (strefa 7), używany przez część
+// lokalnych serwerów powiatowych (np. powiat warszawski zachodni)
+// zamiast ogólnopolskiego EPSG:2180.
+proj4.defs('EPSG:2178','+proj=tmerc +lat_0=0 +lon_0=21 +k=0.999923 +x_0=7500000 +y_0=0 +ellps=GRS80 +units=m +no_defs +type=crs');
+function bboxToCRS(bbox,epsg){const p=String(bbox||'').split(',').slice(0,4).map(Number);if(p.length!==4||p.some(v=>!Number.isFinite(v)))return null;const [south,west,north,east]=p;const corners=[[west,south],[east,south],[east,north],[west,north]].map(ll=>proj4('EPSG:4326',epsg,ll));const xs=corners.map(p=>p[0]),ys=corners.map(p=>p[1]);return{minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)}}
 function send(res,status,type,body){res.writeHead(status,{'Content-Type':type,'Cache-Control':'no-store','Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,OPTIONS'});res.end(body)}
 function bbox2180(bbox){const p=String(bbox||'').split(',').slice(0,4).map(Number);if(p.length!==4||p.some(v=>!Number.isFinite(v)))return null;const [south,west,north,east]=p;const corners=[[west,south],[east,south],[east,north],[west,north]].map(ll=>proj4('EPSG:4326','EPSG:2180',ll));const xs=corners.map(p=>p[0]),ys=corners.map(p=>p[1]);return{minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)}}
 function xmlDecode(s){return String(s||'').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'\"').replace(/&apos;/g,"'").trim()}
@@ -290,6 +295,34 @@ async function discoverPowiatConfig(teryt){
 // Krok 2: mając już config (z cache albo świeżo odkryty), pobiera AKTUALNE
 // dane działek dla żądanego obszaru mapy. To zapytanie wykonuje się ZA
 // KAŻDYM razem na żywo - nigdy nie jest cache'owane.
+function parseGmlGenericCRS(text,idField,grupaField,fromEpsg){
+  const features=[];
+  const members=text.match(/<wfs:member\b[\s\S]*?<\/wfs:member>/gi)||[];
+  for(const member of members){
+    const id=idField?extractFieldValue(member,idField):null;
+    const group=grupaField?extractFieldValue(member,grupaField):null;
+    const rings=[];
+    const re=/<gml:(?:exterior|interior)\b[\s\S]*?<gml:posList\b[^>]*>([\s\S]*?)<\/gml:posList>[\s\S]*?<\/gml:(?:exterior|interior)>/gi;
+    let m;
+    while((m=re.exec(member))){
+      const n=String(m[1]||'').trim().split(/\s+/).map(Number);
+      if(n.length<8||n.length%2)continue;
+      const ring=[];
+      let bad=false;
+      for(let i=0;i<n.length;i+=2){
+        const a=n[i],b=n[i+1];
+        if(!Number.isFinite(a)||!Number.isFinite(b)){bad=true;break}
+        const p=proj4(fromEpsg,'EPSG:4326',[b,a]); // konwencja GML: pierwsza wartość=northing/Y
+        ring.push([p[0],p[1]]);
+      }
+      if(!bad&&ring.length)rings.push(ring);
+    }
+    if(!rings.length)continue;
+    features.push({type:'Feature',properties:{id_dzialki:id,GRUPA_REJESTROWA:group},geometry:{type:'Polygon',coordinates:rings}});
+  }
+  return{type:'FeatureCollection',features};
+}
+
 async function fetchOwnershipData(config,south,west,north,east,cachedMode){
   function inBounds(data){
     if(!data||!Array.isArray(data.features)||!data.features.length)return false;
@@ -314,6 +347,11 @@ async function fetchOwnershipData(config,south,west,north,east,cachedMode){
     }else if(mode==='srs4326-lonlat'){
       params.srsName='EPSG:4326';
       bboxStr=`${west},${south},${east},${north}`;
+    }else if(mode==='srs2178-xy'||mode==='srs2178-yx'){
+      const b=bboxToCRS(`${south},${west},${north},${east}`,'EPSG:2178');
+      if(!b){attemptLog.push({mode,error:'bboxToCRS_failed'});return{ok:false}}
+      params.srsName='EPSG:2178';
+      bboxStr=mode==='srs2178-xy'?`${b.minX.toFixed(2)},${b.minY.toFixed(2)},${b.maxX.toFixed(2)},${b.maxY.toFixed(2)}`:`${b.minY.toFixed(2)},${b.minX.toFixed(2)},${b.maxY.toFixed(2)},${b.maxX.toFixed(2)}`;
     }else{
       const b=bbox2180(`${south},${west},${north},${east}`);
       if(!b){attemptLog.push({mode,error:'bbox2180_failed'});return{ok:false}}
@@ -326,7 +364,7 @@ async function fetchOwnershipData(config,south,west,north,east,cachedMode){
     if(res.status!==200||!res.text){attemptLog.push({mode,bboxSent:bboxStr,status:res.status,error:res.error||'http_error'});return{ok:false}}
     if(/<(?:ows:)?ExceptionReport\b/i.test(res.text)||/InvalidParameterValue/i.test(res.text)){attemptLog.push({mode,bboxSent:bboxStr,status:res.status,error:'exception_report',preview:res.text.slice(0,300)});return{ok:false}}
     if(!/<(?:wfs:)?FeatureCollection\b/i.test(res.text)){attemptLog.push({mode,bboxSent:bboxStr,status:res.status,error:'not_feature_collection',contentTypePreview:res.text.slice(0,150)});return{ok:false}}
-    data=mode.startsWith('srs4326')?parseGmlGeneric(res.text,config.idField,config.grupaField,mode==='srs4326-latlon'):parseGmlGeneric2180(res.text,config.idField,config.grupaField);
+    data=mode.startsWith('srs4326')?parseGmlGeneric(res.text,config.idField,config.grupaField,mode==='srs4326-latlon'):mode.startsWith('srs2178')?parseGmlGenericCRS(res.text,config.idField,config.grupaField,'EPSG:2178'):parseGmlGeneric2180(res.text,config.idField,config.grupaField);
     const valid=inBounds(data);
     attemptLog.push({mode,bboxSent:bboxStr,requestUrl:target.href,status:res.status,featureCount:data.features.length,inBounds:valid,rawPreview:data.features.length?undefined:res.text.slice(0,400)});
     return{ok:true,data,valid};
@@ -336,7 +374,7 @@ async function fetchOwnershipData(config,south,west,north,east,cachedMode){
     const r=await attempt(cachedMode);
     if(r.ok&&r.valid)return{data:r.data,workingMode:cachedMode,attemptLog};
   }
-  for(const mode of['srs4326-latlon','srs4326-lonlat','srs2180-xy','srs2180-yx']){
+  for(const mode of['srs4326-latlon','srs4326-lonlat','srs2180-xy','srs2180-yx','srs2178-xy','srs2178-yx']){
     if(mode===cachedMode)continue;
     const r=await attempt(mode);
     if(r.ok&&r.valid)return{data:r.data,workingMode:mode,attemptLog};
