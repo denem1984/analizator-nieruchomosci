@@ -358,7 +358,12 @@ async function fetchOwnershipData(config,south,west,north,east,cachedMode){
       params.srsName='EPSG:2180';
       bboxStr=mode==='srs2180-xy'?`${b.minX.toFixed(2)},${b.minY.toFixed(2)},${b.maxX.toFixed(2)},${b.maxY.toFixed(2)}`:`${b.minY.toFixed(2)},${b.minX.toFixed(2)},${b.maxY.toFixed(2)},${b.maxX.toFixed(2)}`;
     }
-    params.bbox=bboxStr;
+    // POTWIERDZONE DIAGNOSTYKĄ: część serwerów (WFS 1.1.0, np. wms.pwz.pl)
+    // poprawnie filtruje po obszarze TYLKO, gdy układ współrzędnych jest
+    // dopisany wprost do parametru bbox jako piąta wartość - sam osobny
+    // parametr srsName nie wystarcza do filtrowania (choć wpływa na układ
+    // zwracanych geometrii). Dopisujemy go zawsze, dla bezpieczeństwa.
+    params.bbox=`${bboxStr},${params.srsName}`;
     for(const[k,v]of Object.entries(params))target.searchParams.set(k,v);
     const res=await fetchText(target.href,15000);
     if(res.status!==200||!res.text){attemptLog.push({mode,bboxSent:bboxStr,status:res.status,error:res.error||'http_error'});return{ok:false}}
