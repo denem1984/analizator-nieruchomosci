@@ -341,30 +341,30 @@ async function fetchOwnershipData(config,south,west,north,east,cachedMode){
     const target=new URL(config.wfsUrl);
     const params={service:'WFS',version:config.version,request:'GetFeature',startIndex:'0',count:'1000'};
     params[config.version.startsWith('1.')?'typeName':'typeNames']=config.layerName;
-    let bboxStr,data=null;
+    let bboxStr,crs,data=null;
     if(mode==='srs4326-latlon'){
-      params.srsName='EPSG:4326';
+      crs='EPSG:4326';
       bboxStr=`${south},${west},${north},${east}`;
     }else if(mode==='srs4326-lonlat'){
-      params.srsName='EPSG:4326';
+      crs='EPSG:4326';
       bboxStr=`${west},${south},${east},${north}`;
     }else if(mode==='srs2178-xy'||mode==='srs2178-yx'){
       const b=bboxToCRS(`${south},${west},${north},${east}`,'EPSG:2178');
       if(!b){attemptLog.push({mode,error:'bboxToCRS_failed'});return{ok:false}}
-      params.srsName='EPSG:2178';
+      crs='EPSG:2178';
       bboxStr=mode==='srs2178-xy'?`${b.minX.toFixed(2)},${b.minY.toFixed(2)},${b.maxX.toFixed(2)},${b.maxY.toFixed(2)}`:`${b.minY.toFixed(2)},${b.minX.toFixed(2)},${b.maxY.toFixed(2)},${b.maxX.toFixed(2)}`;
     }else{
       const b=bbox2180(`${south},${west},${north},${east}`);
       if(!b){attemptLog.push({mode,error:'bbox2180_failed'});return{ok:false}}
-      params.srsName='EPSG:2180';
+      crs='EPSG:2180';
       bboxStr=mode==='srs2180-xy'?`${b.minX.toFixed(2)},${b.minY.toFixed(2)},${b.maxX.toFixed(2)},${b.maxY.toFixed(2)}`:`${b.minY.toFixed(2)},${b.minX.toFixed(2)},${b.maxY.toFixed(2)},${b.maxX.toFixed(2)}`;
     }
-    // POTWIERDZONE DIAGNOSTYKĄ: część serwerów (WFS 1.1.0, np. wms.pwz.pl)
-    // poprawnie filtruje po obszarze TYLKO, gdy układ współrzędnych jest
-    // dopisany wprost do parametru bbox jako piąta wartość - sam osobny
-    // parametr srsName nie wystarcza do filtrowania (choć wpływa na układ
-    // zwracanych geometrii). Dopisujemy go zawsze, dla bezpieczeństwa.
-    params.bbox=`${bboxStr},${params.srsName}`;
+    // POTWIERDZONE DIAGNOSTYKĄ: na serwerze wms.pwz.pl (WFS 1.1.0) działa
+    // WYŁĄCZNIE wersja z układem współrzędnych dopisanym do samego bbox,
+    // BEZ osobnego parametru srsName - dodanie obu naraz psuje filtrowanie
+    // (sprawdzone bezpośrednim porównaniem). Dlatego świadomie NIE ustawiamy
+    // tu params.srsName - tylko wpisujemy układ wprost do bbox.
+    params.bbox=`${bboxStr},${crs}`;
     for(const[k,v]of Object.entries(params))target.searchParams.set(k,v);
     const res=await fetchText(target.href,15000);
     if(res.status!==200||!res.text){attemptLog.push({mode,bboxSent:bboxStr,status:res.status,error:res.error||'http_error'});return{ok:false}}
