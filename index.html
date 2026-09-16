@@ -44,7 +44,7 @@ function clipRingToBBox(ring,minX,minY,maxX,maxY){
 }
 
 function renderParcelLabels(features){parcelLabels.clearLayers();const baseSize=parcelFontSize(),minSize=7,accepted=[];
-const vb=map.getBounds(),pad=.02,vMinX=vb.getWest()-pad,vMaxX=vb.getEast()+pad,vMinY=vb.getSouth()-pad,vMaxY=vb.getNorth()+pad;
+const vb=map.getBounds(),latSpan=vb.getNorth()-vb.getSouth(),lonSpan=vb.getEast()-vb.getWest(),padY=latSpan*.03,padX=lonSpan*.03,vMinX=vb.getWest()-padX,vMaxX=vb.getEast()+padX,vMinY=vb.getSouth()-padY,vMaxY=vb.getNorth()+padY;
 for(const f of features){const id=f?.properties?.id_dzialki||f?.properties?.idDzialki||f?.properties?.NUMER_DZIALKI||f?.properties?.numer_dzialki;if(!id)continue;const geom=f.geometry;
 let ring=null;if(geom.type==="Polygon")ring=geom.coordinates[0];else if(geom.type==="MultiPolygon"){let best=null,area=-1;for(const poly of geom.coordinates){const r=poly[0];let a=0;for(let i=1;i<r.length;i++)a+=Math.abs(r[i-1][0]*r[i][1]-r[i][0]*r[i-1][1]);if(a>area){area=a;best=r}}ring=best}
 if(!ring)continue;
