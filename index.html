@@ -10,13 +10,17 @@ function ringBBox(ring){let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Inf
 // przekroju poziomego przechodzącego przez ten sam punkt - to działa
 // dobrze nawet dla bardzo wydłużonych pasów gruntu.
 function robustInteriorPoint(ring){
+  const bb=ringBBox(ring);
+  const midY=(bb.minY+bb.maxY)/2;
+  let midX=scanlineMidpoint(ring,midY);
+  if(midX!==null)return[midX,midY];
   const c=ringCentroid(ring);
   if(c&&pointInRing(c,ring))return c;
-  const bb=ringBBox(ring);
-  const y=c?c[1]:(bb.minY+bb.maxY)/2;
-  const midX=scanlineMidpoint(ring,y);
-  if(midX!==null)return[midX,y];
-  return[(bb.minX+bb.maxX)/2,(bb.minY+bb.maxY)/2]
+  if(c){
+    midX=scanlineMidpoint(ring,c[1]);
+    if(midX!==null)return[midX,c[1]];
+  }
+  return[(bb.minX+bb.maxX)/2,midY];
 }function featurePoint(g){if(!g)return null;if(g.type==="Point")return g.coordinates;if(g.type==="Polygon"){const c=robustInteriorPoint(g.coordinates[0]);return c||g.coordinates[0][0]}if(g.type==="MultiPolygon"){let best=null,area=-1;for(const poly of g.coordinates){const r=poly[0];let a=0;for(let i=1;i<r.length;i++)a+=Math.abs(r[i-1][0]*r[i][1]-r[i][0]*r[i-1][1]);if(a>area){area=a;best=robustInteriorPoint(r)||r[0]}}return best}return null}function makeParcelLabel(id,ll,size){const icon=L.divIcon({className:"parcel-label",html:`<span style="font-size:${size}px">${String(id).replace(/[&<>\"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]))}</span>`,iconSize:[1,1],iconAnchor:[0,0]});return L.marker(ll,{icon,interactive:false,keyboard:false,pane:parcelLabelPane})}function labelBoxesOverlap(a,b){return !(a.right<b.left||a.left>b.right||a.bottom<b.top||a.top>b.bottom)}// Przycina wielobok (pierścień) do prostokąta aktualnie widocznego obszaru
 // mapy - dzięki temu numer działki liczony jest na podstawie tego, co
 // FAKTYCZNIE widać na ekranie, a nie całej, możliwe że częściowo
