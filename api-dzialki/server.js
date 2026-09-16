@@ -339,7 +339,8 @@ async function fetchOwnershipData(config,south,west,north,east,cachedMode){
   const attemptLog=[];
   async function attempt(mode){
     const target=new URL(config.wfsUrl);
-    const params={service:'WFS',version:config.version,request:'GetFeature',startIndex:'0',count:'1000'};
+    const params={service:'WFS',version:config.version,request:'GetFeature'};
+    if(config.version.startsWith('1.'))params.maxFeatures='1000';else{params.startIndex='0';params.count='1000'}
     params[config.version.startsWith('1.')?'typeName':'typeNames']=config.layerName;
     let bboxStr,crs,data=null;
     if(mode==='srs4326-latlon'){
