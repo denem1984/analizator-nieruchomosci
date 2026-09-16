@@ -396,29 +396,38 @@ async function probePowiat(reqUrl,res){
   const config=await discoverPowiatConfig(teryt);
   if(!config.ok)return send(res,200,'application/json; charset=utf-8',JSON.stringify({config}));
 
+  // Bbox do testu: albo podany w zapytaniu, albo domyślny (znana, wcześniej
+  // działająca lokalizacja w EPSG:2178) - żeby porównywać jabłka z jabłkami,
+  // wszystkie warianty testujemy na TYM SAMYM obszarze w jednym wywołaniu.
+  const customBbox2178=u.searchParams.get('bbox2178');
+  const bbox2178=customBbox2178||'5786215.27,7480009.28,5786660.31,7480273.58';
+
   async function tryUrl(label,extraParams){
     const target=new URL(config.wfsUrl);
-    const params={service:'WFS',version:config.version,request:'GetFeature',count:'3',...extraParams};
+    const params={service:'WFS',version:config.version,request:'GetFeature',...extraParams};
     params[config.version.startsWith('1.')?'typeName':'typeNames']=config.layerName;
     for(const[k,v]of Object.entries(params))target.searchParams.set(k,v);
     const r=await fetchText(target.href,20000);
     const featureCount=(r.text.match(/<gml:featureMember>/gi)||[]).length;
-    return{label,requestUrl:target.href,status:r.status,featureCount,preview:r.text.slice(0,600)};
+    return{label,requestUrl:target.href,status:r.status,featureCount};
   }
 
   const results=[];
-  // Test 1: brak bbox w ogóle (kontrola - powinno działać, sprawdzone już wcześniej)
-  results.push(await tryUrl('bez_bbox',{}));
-  // Test 2: OGROMNY obszar (cała Polska) w natywnym układzie 2178 - sprawdza,
-  // czy mechanizm bbox w ogóle cokolwiek zwraca, niezależnie od precyzji
-  results.push(await tryUrl('ogromny_bbox_2178',{srsName:'EPSG:2178',bbox:'7000000,5400000,8200000,5900000'}));
-  // Test 3: układ dopisany wprost do parametru bbox (starszy, alternatywny zapis WFS 1.1.0)
-  results.push(await tryUrl('bbox_z_crs_w_parametrze',{bbox:'5786215.27,7480009.28,5786660.31,7480273.58,EPSG:2178'}));
+  // A: dokładnie taki zestaw parametrów, jaki kiedyś zadziałał (punkt odniesienia)
+  results.push(await tryUrl('A_znany_dobry_count3',{count:'3',bbox:bbox2178+',EPSG:2178'}));
+  // B: to samo, ale maxFeatures zamiast count (to, co teraz wysyła produkcja)
+  results.push(await tryUrl('B_maxFeatures1000',{maxFeatures:'1000',bbox:bbox2178+',EPSG:2178'}));
+  // C: to samo co A, ale maxFeatures zamiast count (izoluje wpływ nazwy parametru limitu)
+  results.push(await tryUrl('C_maxFeatures3',{maxFeatures:'3',bbox:bbox2178+',EPSG:2178'}));
+  // D: bez żadnego parametru limitu w ogóle
+  results.push(await tryUrl('D_bez_limitu',{bbox:bbox2178+',EPSG:2178'}));
+  // E: z osobnym srsName ORAZ CRS w bbox jednocześnie
+  results.push(await tryUrl('E_oba_naraz',{count:'3',srsName:'EPSG:2178',bbox:bbox2178+',EPSG:2178'}));
+  // F: z osobnym srsName, BEZ CRS w bbox
+  results.push(await tryUrl('F_tylko_srsName',{count:'3',srsName:'EPSG:2178',bbox:bbox2178}));
 
-  return send(res,200,'application/json; charset=utf-8',JSON.stringify({config,results},null,2));
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify({config,bboxTestowany:bbox2178,results},null,2));
 }
-
-
 
 async function ownershipLive(reqUrl,res){
   const u=new URL(reqUrl,'http://localhost');
