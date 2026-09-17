@@ -389,6 +389,24 @@ async function fetchOwnershipData(config,south,west,north,east,cachedMode){
   return{data:null,workingMode:null,attemptLog};
 }
 
+async function probeNationalWfsFields(res){
+  // Sprawdza PEŁNĄ listę pól dostępnych w ogólnopolskiej usłudze WFS
+  // (UslugaZbiorcza) dla warstwy ms:dzialki - dotąd zapytania do tej
+  // usługi ograniczały się tylko do id_dzialki,geom (bo tylko tego było
+  // trzeba do numerów działek), więc nigdy nie sprawdziliśmy, czy jest
+  // tam też grupa_rejestrowa.
+  const target=new URL(WFS);
+  target.searchParams.set('SERVICE','WFS');
+  target.searchParams.set('VERSION','2.0.0');
+  target.searchParams.set('REQUEST','DescribeFeatureType');
+  target.searchParams.set('TYPENAMES','ms:dzialki');
+  const r=await fetchText(target.href,20000);
+  if(r.status!==200||!r.text)return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'Zapytanie nie powiodło się.',status:r.status,detail:r.error}));
+  const fields=Array.from(r.text.matchAll(/<(?:[\w]+:)?element\s+[^>]*\bname=["']([^"']+)["']/gi)).map(m=>m[1]).filter(f=>!/^(?:sequence|complexType|complexContent|extension|restriction)$/i.test(f));
+  const hasGrupa=fields.some(f=>/grupa|rejestr/i.test(f));
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify({requestUrl:target.href,status:r.status,allFields:fields,hasGrupaRejestrowa:hasGrupa},null,2));
+}
+
 async function probePowiat(reqUrl,res){
   const u=new URL(reqUrl,'http://localhost');
   const teryt=(u.searchParams.get('teryt')||'').trim().slice(0,4);
@@ -666,5 +684,5 @@ async function wfs(reqUrl,res){
   return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'WFS nie zwrócił danych GeoJSON/GML.',status:out.status,contentType:out.ct,preview:(out.text||'').slice(0,500)}));
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
