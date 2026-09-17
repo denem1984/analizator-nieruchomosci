@@ -404,7 +404,33 @@ async function probeNationalWfsFields(res){
   if(r.status!==200||!r.text)return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'Zapytanie nie powiodło się.',status:r.status,detail:r.error}));
   const fields=Array.from(r.text.matchAll(/<(?:[\w]+:)?element\s+[^>]*\bname=["']([^"']+)["']/gi)).map(m=>m[1]).filter(f=>!/^(?:sequence|complexType|complexContent|extension|restriction)$/i.test(f));
   const hasGrupa=fields.some(f=>/grupa|rejestr/i.test(f));
-  return send(res,200,'application/json; charset=utf-8',JSON.stringify({requestUrl:target.href,status:r.status,allFields:fields,hasGrupaRejestrowa:hasGrupa},null,2));
+
+  // Sprawdzamy też, czy pole ma FAKTYCZNIE wypełnione wartości, na znanej
+  // działce 1/48 w Piszu (obręb Łupki) - nie wystarczy, że pole istnieje
+  // w schemacie, musi też mieć realne dane.
+  const testBbox='53.6382,21.8364,53.6395,21.8381'; // okolice działki 1/48, Pisz
+  const b=bbox2180(testBbox);
+  let sampleData=null;
+  if(b){
+    const target2=new URL(WFS);
+    for(const[k,v]of Object.entries({service:'WFS',version:'2.0.0',request:'GetFeature',typenames:'ms:dzialki',srsName:'EPSG:2180',bbox:`${b.minX.toFixed(2)},${b.minY.toFixed(2)},${b.maxX.toFixed(2)},${b.maxY.toFixed(2)}`,count:'20',propertyName:'id_dzialki,grupa_rejestrowa,geom'}))
+      target2.searchParams.set(k,v);
+    const r2=await fetchText(target2.href,20000);
+    const ct2=r2.text||'';
+    let parsed=null;
+    try{
+      if(/^\s*\{/.test(ct2))parsed=JSON.parse(ct2);
+    }catch(e){}
+    if(parsed&&Array.isArray(parsed.features)){
+      sampleData=parsed.features.map(f=>({id:f.properties?.id_dzialki,grupa:f.properties?.GRUPA_REJESTROWA}));
+    }else{
+      const ids=Array.from(ct2.matchAll(/<(?:ms:)?id_dzialki>([^<]*)<\/(?:ms:)?id_dzialki>/gi)).map(m=>m[1]);
+      const grupy=Array.from(ct2.matchAll(/<(?:ms:)?grupa_rejestrowa>([^<]*)<\/(?:ms:)?grupa_rejestrowa>/gi)).map(m=>m[1]);
+      sampleData={idsFound:ids,grupyFound:grupy,contentTypePreview:ct2.slice(0,400)};
+    }
+  }
+
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify({requestUrl:target.href,status:r.status,allFields:fields,hasGrupaRejestrowa:hasGrupa,sampleFromPisz:sampleData},null,2));
 }
 
 async function probePowiat(reqUrl,res){
