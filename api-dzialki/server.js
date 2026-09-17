@@ -396,11 +396,34 @@ async function probePowiat(reqUrl,res){
   const config=await discoverPowiatConfig(teryt);
   if(!config.ok)return send(res,200,'application/json; charset=utf-8',JSON.stringify({config}));
 
-  // Bbox do testu: albo podany w zapytaniu, albo domyślny (znana, wcześniej
-  // działająca lokalizacja w EPSG:2178) - żeby porównywać jabłka z jabłkami,
-  // wszystkie warianty testujemy na TYM SAMYM obszarze w jednym wywołaniu.
-  const customBbox2178=u.searchParams.get('bbox2178');
-  const bbox2178=customBbox2178||'5786215.27,7480009.28,5786660.31,7480273.58';
+  // Bbox do testu: albo podany ręcznie w zapytaniu, albo AUTOMATYCZNIE
+  // wyznaczony na podstawie prawdziwej, pierwszej lepszej działki z tego
+  // KONKRETNEGO powiatu (a nie sztywno wpisanych współrzędnych spod
+  // Warszawy) - dzięki temu narzędzie działa poprawnie dla dowolnego
+  // powiatu w Polsce, nie tylko tego, dla którego pierwotnie je pisałem.
+  let bbox2178=u.searchParams.get('bbox2178');
+  let autoBboxNote=null;
+  if(!bbox2178){
+    const probeUrl=new URL(config.wfsUrl);
+    const probeParams={service:'WFS',version:config.version,request:'GetFeature'};
+    probeParams[config.version.startsWith('1.')?'typeName':'typeNames']=config.layerName;
+    probeParams[config.version.startsWith('1.')?'maxFeatures':'count']='1';
+    for(const[k,v]of Object.entries(probeParams))probeUrl.searchParams.set(k,v);
+    const probeRes=await fetchText(probeUrl.href,15000);
+    const posListMatch=probeRes.text&&probeRes.text.match(/<gml:posList[^>]*>([\s\S]*?)<\/gml:posList>/i);
+    if(posListMatch){
+      const nums=posListMatch[1].trim().split(/\s+/).map(Number).filter(Number.isFinite);
+      if(nums.length>=2){
+        const xs=[],ys=[];
+        for(let i=0;i<nums.length;i+=2){ys.push(nums[i]);xs.push(nums[i+1])} // GML w tym układzie: northing,easting
+        const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+        const padX=Math.max((maxX-minX)*3,100),padY=Math.max((maxY-minY)*3,100);
+        bbox2178=`${(minY-padY).toFixed(2)},${(minX-padX).toFixed(2)},${(maxY+padY).toFixed(2)},${(maxX+padX).toFixed(2)}`;
+        autoBboxNote='wyznaczony automatycznie na podstawie prawdziwej działki tego powiatu';
+      }
+    }
+    if(!bbox2178){bbox2178='5786215.27,7480009.28,5786660.31,7480273.58';autoBboxNote='UWAGA: nie udało się automatycznie wyznaczyć obszaru - użyto domyślnego (okolice Warszawy), wynik może być niemiarodajny dla tego powiatu'}
+  }
 
   async function tryUrl(label,extraParams){
     const target=new URL(config.wfsUrl);
@@ -426,7 +449,7 @@ async function probePowiat(reqUrl,res){
   // F: z osobnym srsName, BEZ CRS w bbox
   results.push(await tryUrl('F_tylko_srsName',{count:'3',srsName:'EPSG:2178',bbox:bbox2178}));
 
-  return send(res,200,'application/json; charset=utf-8',JSON.stringify({config,bboxTestowany:bbox2178,results},null,2));
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify({config,bboxTestowany:bbox2178,autoBboxNote,results},null,2));
 }
 
 async function ownershipLive(reqUrl,res){
