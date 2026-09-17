@@ -410,13 +410,13 @@ async function probeNationalWfsFields(res){
   // w schemacie, musi też mieć realne dane. Używamy TEGO SAMEGO,
   // sprawdzonego mechanizmu auto-korekcji kolejności osi (X,Y / Y,X), co
   // już działająca funkcja wfs() - inaczej można trafić w złe miejsce.
-  const testBboxRaw='53.6382,21.8364,53.6395,21.8381'; // okolice działki 1/48, Pisz
+  const testBboxRaw='52.2110,20.7075,52.2130,20.7095'; // okolice działek w pow. warszawskim zachodnim (teryt 1432), znane jako mające grupę rejestrową
   const[tSouth,tWest,tNorth,tEast]=testBboxRaw.split(',').map(Number);
   const b=bbox2180(testBboxRaw);
   let sampleData=null;
   if(b){
     function inBoundsTest(ids){
-      return ids.length>0&&ids.every(id=>id.startsWith('281603'));
+      return ids.length>0&&ids.every(id=>id.startsWith('1432'));
     }
     async function attemptSample(bboxStr,axisLabel){
       const target2=new URL(WFS);
