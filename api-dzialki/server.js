@@ -407,27 +407,35 @@ async function probeNationalWfsFields(res){
 
   // Sprawdzamy też, czy pole ma FAKTYCZNIE wypełnione wartości, na znanej
   // działce 1/48 w Piszu (obręb Łupki) - nie wystarczy, że pole istnieje
-  // w schemacie, musi też mieć realne dane.
-  const testBbox='53.6382,21.8364,53.6395,21.8381'; // okolice działki 1/48, Pisz
-  const b=bbox2180(testBbox);
+  // w schemacie, musi też mieć realne dane. Używamy TEGO SAMEGO,
+  // sprawdzonego mechanizmu auto-korekcji kolejności osi (X,Y / Y,X), co
+  // już działająca funkcja wfs() - inaczej można trafić w złe miejsce.
+  const testBboxRaw='53.6382,21.8364,53.6395,21.8381'; // okolice działki 1/48, Pisz
+  const[tSouth,tWest,tNorth,tEast]=testBboxRaw.split(',').map(Number);
+  const b=bbox2180(testBboxRaw);
   let sampleData=null;
   if(b){
-    const target2=new URL(WFS);
-    for(const[k,v]of Object.entries({service:'WFS',version:'2.0.0',request:'GetFeature',typenames:'ms:dzialki',srsName:'EPSG:2180',bbox:`${b.minX.toFixed(2)},${b.minY.toFixed(2)},${b.maxX.toFixed(2)},${b.maxY.toFixed(2)}`,count:'20',propertyName:'id_dzialki,grupa_rejestrowa,geom'}))
-      target2.searchParams.set(k,v);
-    const r2=await fetchText(target2.href,20000);
-    const ct2=r2.text||'';
-    let parsed=null;
-    try{
-      if(/^\s*\{/.test(ct2))parsed=JSON.parse(ct2);
-    }catch(e){}
-    if(parsed&&Array.isArray(parsed.features)){
-      sampleData=parsed.features.map(f=>({id:f.properties?.id_dzialki,grupa:f.properties?.GRUPA_REJESTROWA}));
-    }else{
+    function inBoundsTest(ids){
+      return ids.length>0&&ids.every(id=>id.startsWith('281603'));
+    }
+    async function attemptSample(bboxStr,axisLabel){
+      const target2=new URL(WFS);
+      for(const[k,v]of Object.entries({service:'WFS',version:'2.0.0',request:'GetFeature',typenames:'ms:dzialki',srsName:'EPSG:2180',bbox:bboxStr,count:'20',propertyName:'id_dzialki,grupa_rejestrowa'}))
+        target2.searchParams.set(k,v);
+      const r2=await fetchText(target2.href,20000);
+      const ct2=r2.text||'';
       const ids=Array.from(ct2.matchAll(/<(?:ms:)?id_dzialki>([^<]*)<\/(?:ms:)?id_dzialki>/gi)).map(m=>m[1]);
       const grupy=Array.from(ct2.matchAll(/<(?:ms:)?grupa_rejestrowa>([^<]*)<\/(?:ms:)?grupa_rejestrowa>/gi)).map(m=>m[1]);
-      sampleData={idsFound:ids,grupyFound:grupy,contentTypePreview:ct2.slice(0,400)};
+      return{axisLabel,ids,grupy,validLocation:inBoundsTest(ids)};
     }
+    const bboxXY=`${b.minX.toFixed(2)},${b.minY.toFixed(2)},${b.maxX.toFixed(2)},${b.maxY.toFixed(2)}`;
+    const bboxYX=`${b.minY.toFixed(2)},${b.minX.toFixed(2)},${b.maxY.toFixed(2)},${b.maxX.toFixed(2)}`;
+    let res1=await attemptSample(bboxXY,'X,Y');
+    if(!res1.validLocation){
+      const res2=await attemptSample(bboxYX,'Y,X');
+      if(res2.validLocation||res2.ids.length>res1.ids.length)res1=res2;
+    }
+    sampleData=res1;
   }
 
   return send(res,200,'application/json; charset=utf-8',JSON.stringify({requestUrl:target.href,status:r.status,allFields:fields,hasGrupaRejestrowa:hasGrupa,sampleFromPisz:sampleData},null,2));
