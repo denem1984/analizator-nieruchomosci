@@ -5,6 +5,9 @@ const {PNG}=require('pngjs');
 const PORT=process.env.PORT||10000;
 const WFS='https://mapy.geoportal.gov.pl/wss/service/PZGIK/EGIB/WFS/UslugaZbiorcza';
 const OWNERSHIP_WMS='https://mapy.geoportal.gov.pl/wss/ext/MapaWlasnosci';
+const POG_UCHWALONE_WMS='https://mapy.geoportal.gov.pl/wss/ext/PlanyOgolneGmin';
+const POG_PROJEKTOWANE_WMS='https://mapy.geoportal.gov.pl/wss/ext/ProjektowanePlanyOgolneGmin';
+const STUDIUM_WMS='https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaStudiumKierunkowZagospodarowaniaPrzestrzennego';
 const PISKI_WFS='https://powiatpiski.geoportal2.pl/map/geoportal/wfs.php';
 const CRS2180='+proj=tmerc +lat_0=0 +lon_0=19 +k=0.9993 +x_0=500000 +y_0=-5300000 +ellps=GRS80 +units=m +no_defs +type=crs';
 proj4.defs('EPSG:2180',CRS2180);
@@ -83,6 +86,39 @@ async function mapaWlasnosciCapabilities(res){
     clearTimeout(timer);
     return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:e.name==='AbortError'?'Timeout':e.message}));
   }
+}
+
+async function probeWmsLayers(url){
+  const target=new URL(url);
+  target.searchParams.set('SERVICE','WMS');
+  target.searchParams.set('REQUEST','GetCapabilities');
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+  try{
+    const r=await fetch(target.href,{signal:controller.signal,headers:{'User-Agent':'MAPA plan layers probe/1.0'}});
+    const text=await r.text();
+    clearTimeout(timer);
+    const names=Array.from(text.matchAll(/<Name>([^<]+)<\/Name>/gi)).map(m=>m[1]);
+    const titles=Array.from(text.matchAll(/<Title>([^<]+)<\/Title>/gi)).map(m=>m[1]);
+    const layers=names.map((n,i)=>({name:n,title:titles[i]||null}));
+    return{status:r.status,contentType:r.headers.get('content-type'),totalLayers:layers.length,layers};
+  }catch(e){
+    clearTimeout(timer);
+    return{error:e.name==='AbortError'?'Timeout':e.message};
+  }
+}
+
+async function planLayersCapabilities(res){
+  // Diagnostyka JEDNORAZOWA: poznajemy techniczne nazwy warstw (LAYERS=)
+  // dla trzech nowych usług GUGiK (POG uchwalone, POG projektowane, Studium),
+  // żeby nie zgadywać ich w kodzie frontu — ten sam wzorzec co
+  // mapaWlasnosciCapabilities powyżej.
+  const [pogUchwalone,pogProjektowane,studium]=await Promise.all([
+    probeWmsLayers(POG_UCHWALONE_WMS),
+    probeWmsLayers(POG_PROJEKTOWANE_WMS),
+    probeWmsLayers(STUDIUM_WMS)
+  ]);
+  console.log('PLAN_LAYERS_CAPABILITIES',JSON.stringify({pogUchwalone,pogProjektowane,studium}));
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify({pogUchwalone,pogProjektowane,studium},null,2));
 }
 
 async function scanGrupaRejestrowa(reqUrl,res){
@@ -781,5 +817,5 @@ async function wfs(reqUrl,res){
   return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'WFS nie zwrócił danych GeoJSON/GML.',status:out.status,contentType:out.ct,preview:(out.text||'').slice(0,500)}));
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
