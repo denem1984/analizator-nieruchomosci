@@ -21,7 +21,7 @@ async function fetchGroupByPointLL(lon,lat,expectedId){
   }catch(e){return null}
 }
 async function enrichMissingGroups(features,my){
-  const candidates=features.filter(f=>f&&f.geometry&&!f.properties?.GRUPA_REJESTROWA).slice(0,40);
+  const candidates=features.filter(f=>f&&f.geometry&&!f.properties?.GRUPA_REJESTROWA).slice(0,60);
   if(!candidates.length)return;
   let i=0;
   async function worker(){
