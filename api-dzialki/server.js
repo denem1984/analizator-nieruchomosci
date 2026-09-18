@@ -632,6 +632,69 @@ async function ownership(reqUrl,res){const u=new URL(reqUrl,'http://localhost');
       return send(res,200,'application/json; charset=utf-8',JSON.stringify({...diag,serverMessage:body.toString('utf-8').slice(0,60000)},null,2));
     }
     return send(res,r.status,ct,body)}catch(e){clearTimeout(timer);return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:e.name==='AbortError'?'Mapa własności przekroczyła limit 90 s.':e.message}))}}
+async function ownershipNational(reqUrl,res){
+  // NOWY, ZNACZNIE PROSTSZY mechanizm mapy własności - zamiast łączyć się
+  // osobno z każdym z ~380 serwerów powiatowych, korzysta z TEJ SAMEJ,
+  // już zaufanej, ogólnopolskiej usługi WFS (UslugaZbiorcza), która od
+  // dawna zasila numery działek. Różnica: dodatkowo prosimy o pole
+  // grupa_rejestrowa. Ograniczenie: to pole jest wypełnione tylko dla
+  // powiatów, które faktycznie publikują tę informację do centralnego
+  // rejestru GUGiK (potwierdzone ok. 47% powiatów) - dla pozostałych
+  // przyjdzie puste i taka działka po prostu nie zostanie pokolorowana.
+  const u=new URL(reqUrl,'http://localhost');
+  const rawBbox=u.searchParams.get('bbox');
+  const parts=String(rawBbox||'').split(',').slice(0,4).map(Number);
+  if(parts.length!==4||parts.some(v=>!Number.isFinite(v)))return send(res,400,'application/json; charset=utf-8',JSON.stringify({error:'Nieprawidłowy bbox EPSG:4326.'}));
+  const[south,west,north,east]=parts;
+  const b=bbox2180(rawBbox);
+  if(!b)return send(res,400,'application/json; charset=utf-8',JSON.stringify({error:'Nieprawidłowy bbox EPSG:4326.'}));
+
+  function inBounds(data){
+    if(!data||!Array.isArray(data.features)||!data.features.length)return false;
+    const f=data.features[0];
+    let c=f&&f.geometry&&f.geometry.coordinates;
+    while(Array.isArray(c)&&Array.isArray(c[0]))c=c[0];
+    if(!Array.isArray(c)||typeof c[0]!=='number'||typeof c[1]!=='number')return false;
+    const[lon,lat]=c;
+    const padLat=Math.max(north-south,0.05),padLon=Math.max(east-west,0.05);
+    return lon>=west-padLon&&lon<=east+padLon&&lat>=south-padLat&&lat<=north+padLat;
+  }
+
+  async function attempt(bboxStr,axisLabel){
+    const target=new URL(WFS);
+    for(const[k,v]of Object.entries({
+      service:'WFS',version:'2.0.0',request:'GetFeature',typenames:'ms:dzialki',
+      srsName:'EPSG:2180',bbox:bboxStr,startIndex:'0',count:'1000',
+      propertyName:'id_dzialki,grupa_rejestrowa,geom'
+    }))target.searchParams.set(k,v);
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),60000);
+    try{
+      const r=await fetch(target.href,{signal:controller.signal,headers:{'User-Agent':'MAPA ownership-national/1.0','Accept':'application/json,text/json,application/xml,text/xml,*/*'}});
+      const text=await r.text();
+      clearTimeout(timer);
+      const isException=/<(?:ows:)?ExceptionReport\b/i.test(text)||/InvalidParameterValue/i.test(text);
+      let data=null;
+      if(!isException&&/<(?:wfs:)?FeatureCollection\b/i.test(text))data=parseGml(text,true);
+      const valid=data&&inBounds(data);
+      return{ok:!!data,valid:!!valid,data};
+    }catch(e){
+      clearTimeout(timer);
+      return{ok:false,valid:false};
+    }
+  }
+
+  const bboxXY=`${b.minX.toFixed(2)},${b.minY.toFixed(2)},${b.maxX.toFixed(2)},${b.maxY.toFixed(2)}`;
+  const bboxYX=`${b.minY.toFixed(2)},${b.minX.toFixed(2)},${b.maxY.toFixed(2)},${b.maxX.toFixed(2)}`;
+  let out=await attempt(bboxXY,'X,Y');
+  if(!out.valid){
+    const out2=await attempt(bboxYX,'Y,X');
+    if(out2.valid)out=out2;
+    else if(out2.ok&&!out.ok)out=out2;
+  }
+  if(out.ok&&out.data)return send(res,200,'application/json; charset=utf-8',JSON.stringify(out.data));
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify({type:'FeatureCollection',features:[]}));
+}
+
 async function wfs(reqUrl,res){
   const u=new URL(reqUrl,'http://localhost');
   const rawBbox=u.searchParams.get('bbox');
@@ -718,5 +781,5 @@ async function wfs(reqUrl,res){
   return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'WFS nie zwrócił danych GeoJSON/GML.',status:out.status,contentType:out.ct,preview:(out.text||'').slice(0,500)}));
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
