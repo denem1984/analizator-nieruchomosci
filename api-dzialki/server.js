@@ -164,6 +164,13 @@ async function probeRuFeature(res){
       result.bodyPreview=buf.toString('utf8',0,1000);
     }
   }catch(e){result.error=e.name==='AbortError'?'Timeout':e.message}
+  try{
+    const capUrl='https://rejestr-urbanistyczny.gov.pl/uslugi-sieciowe/wms-mpzp/ows?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities';
+    const rc=await fetch(capUrl,{headers:{'User-Agent':'Mozilla/5.0 (compatible; MAPA-probe/1.0)'}});
+    const capText=await rc.text();
+    const crsList=Array.from(new Set(Array.from(capText.matchAll(/<(?:CRS|SRS)>([^<]+)<\/(?:CRS|SRS)>/gi)).map(m=>m[1])));
+    result.supportedCRS=crsList;
+  }catch(e){result.supportedCRS_error=e.message}
   return send(res,200,'application/json; charset=utf-8',JSON.stringify(result,null,2));
 }
 
