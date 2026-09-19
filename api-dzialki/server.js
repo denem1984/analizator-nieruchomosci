@@ -121,6 +121,29 @@ async function planLayersCapabilities(res){
   return send(res,200,'application/json; charset=utf-8',JSON.stringify({pogUchwalone,pogProjektowane,studium},null,2));
 }
 
+async function probeRuFeature(res){
+  // Test rozstrzygający (dokładnie te same parametry, które przeglądarka
+  // użytkownika faktycznie wysłała i dostała 200 OK - z devtools) -
+  // sprawdzamy GetFeatureInfo zamiast GetMap, żeby dostać czytelną
+  // odpowiedź tekstową zamiast obrazka.
+  const bbox='717217.4651776128,472158.5895873528,718020.4772003035,473068.7580743565';
+  const layers='APP.MPZP.WOpracowaniu,APP.MPZP.WTrakciePrzyjmowania,APP.MPZP.PrawnieWiazacyLubRealizowany';
+  const url='https://rejestr-urbanistyczny.gov.pl/uslugi-sieciowe/wms-mpzp/ows?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetFeatureInfo'
+    +'&LAYERS='+encodeURIComponent(layers)+'&QUERY_LAYERS='+encodeURIComponent(layers)
+    +'&STYLES=,,&CRS=EPSG:2180&BBOX='+bbox+'&WIDTH=688&HEIGHT=607&I=344&J=303'
+    +'&INFO_FORMAT=text/xml&FEATURE_COUNT=20&FORMAT=image/png&TRANSPARENT=TRUE';
+  const result={requestUrl:url};
+  try{
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
+    const r=await fetch(url,{signal:controller.signal,headers:{'User-Agent':'Mozilla/5.0 (compatible; MAPA-probe/1.0)'}});
+    clearTimeout(timer);
+    const text=await r.text();
+    result.status=r.status;result.contentType=r.headers.get('content-type');result.length=text.length;result.body=text.slice(0,3000);
+  }catch(e){result.error=e.name==='AbortError'?'Timeout':e.message}
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify(result,null,2));
+}
+
+
 async function probeRejestrUrbanistyczny(res){
   // Rejestr Urbanistyczny (uruchomiony 1 lipca 2026) zastępuje stare usługi
   // GUGiK do planowania przestrzennego - te stare mają zniknąć po wrześniu 2026.
@@ -845,5 +868,5 @@ async function wfs(reqUrl,res){
   return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'WFS nie zwrócił danych GeoJSON/GML.',status:out.status,contentType:out.ct,preview:(out.text||'').slice(0,500)}));
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
