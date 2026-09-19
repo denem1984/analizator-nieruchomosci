@@ -133,13 +133,52 @@ function pngNonTransparentPixels(buf){
   }
   if(colorType!==6||bitDepth!==8)return{width,height,colorType,bitDepth,note:'nieoczekiwany format PNG (nie RGBA8) - nie liczę pikseli'};
   const raw=require('zlib').inflateSync(Buffer.concat(idat));
-  const stride=width*4;let nonTransparent=0;
+  const stride=width*4;let nonTransparent=0,firstHit=null;
   for(let y=0;y<height;y++){
     const rowStart=y*(stride+1)+1;
-    for(let x=0;x<width;x++){if(raw[rowStart+x*4+3]>0)nonTransparent++;}
+    for(let x=0;x<width;x++){
+      if(raw[rowStart+x*4+3]>0){
+        nonTransparent++;
+        if(!firstHit)firstHit={x,y};
+      }
+    }
   }
-  return{width,height,nonTransparentPixels:nonTransparent,totalPixels:width*height};
+  return{width,height,nonTransparentPixels:nonTransparent,totalPixels:width*height,firstHit};
 }
+
+async function probeRuFeatureInfo(res){
+  // Punkt zapytania bierzemy z realnego trafienia w piksel (nie zgadujemy środka
+  // obrazka) - dzięki temu wiemy na pewno, że pytamy o miejsce, gdzie coś jest.
+  const bbox='717217.4651776128,472158.5895873528,718020.4772003035,473068.7580743565';
+  const result={};
+  const mapUrl='https://rejestr-urbanistyczny.gov.pl/uslugi-sieciowe/wms-mpzp/ows?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap'
+    +'&LAYERS=APP.MPZP.PrawnieWiazacyLubRealizowany&STYLES=&CRS=EPSG:2180&BBOX='+bbox
+    +'&WIDTH=688&HEIGHT=607&FORMAT=image/png&TRANSPARENT=TRUE';
+  let hit=null;
+  try{
+    const rMap=await fetch(mapUrl,{headers:{'User-Agent':'Mozilla/5.0 (compatible; MAPA-probe/1.0)'}});
+    const buf=Buffer.from(await rMap.arrayBuffer());
+    const px=pngNonTransparentPixels(buf);
+    result.pixelScan=px;
+    hit=px.firstHit;
+  }catch(e){result.pixelScan_error=e.message}
+  if(hit){
+    const infoUrl='https://rejestr-urbanistyczny.gov.pl/uslugi-sieciowe/wms-mpzp/ows?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetFeatureInfo'
+      +'&LAYERS=APP.MPZP.PrawnieWiazacyLubRealizowany&QUERY_LAYERS=APP.MPZP.PrawnieWiazacyLubRealizowany&STYLES=&CRS=EPSG:2180&BBOX='+bbox
+      +'&WIDTH=688&HEIGHT=607&I='+hit.x+'&J='+hit.y+'&INFO_FORMAT=application%2Fjson&FEATURE_COUNT=5&FORMAT=image/png&TRANSPARENT=TRUE';
+    result.getFeatureInfoUrl=infoUrl;
+    try{
+      const rInfo=await fetch(infoUrl,{headers:{'User-Agent':'Mozilla/5.0 (compatible; MAPA-probe/1.0)'}});
+      const text=await rInfo.text();
+      result.status=rInfo.status;result.contentType=rInfo.headers.get('content-type');result.body=text.slice(0,4000);
+    }catch(e){result.getFeatureInfo_error=e.message}
+  }else{
+    result.note='nie znaleziono nieprzezroczystego piksela w obrazie - nie mam gdzie pytać';
+  }
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify(result,null,2));
+}
+
+
 
 async function probeRuPogAndInfo(res){
   const bbox='717217.4651776128,472158.5895873528,718020.4772003035,473068.7580743565';
@@ -929,5 +968,5 @@ async function wfs(reqUrl,res){
   return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'WFS nie zwrócił danych GeoJSON/GML.',status:out.status,contentType:out.ct,preview:(out.text||'').slice(0,500)}));
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);if(u.pathname==='/api/ru-pog-info-test')return probeRuPogAndInfo(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);if(u.pathname==='/api/ru-pog-info-test')return probeRuPogAndInfo(res);if(u.pathname==='/api/ru-featureinfo-test')return probeRuFeatureInfo(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
