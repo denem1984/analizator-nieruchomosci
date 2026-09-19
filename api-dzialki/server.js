@@ -121,24 +121,48 @@ async function planLayersCapabilities(res){
   return send(res,200,'application/json; charset=utf-8',JSON.stringify({pogUchwalone,pogProjektowane,studium},null,2));
 }
 
+function pngNonTransparentPixels(buf){
+  let pos=8,width=0,height=0,bitDepth=0,colorType=0;const idat=[];
+  while(pos<buf.length){
+    const len=buf.readUInt32BE(pos);pos+=4;
+    const type=buf.toString('ascii',pos,pos+4);pos+=4;
+    const data=buf.slice(pos,pos+len);pos+=len;pos+=4;
+    if(type==='IHDR'){width=data.readUInt32BE(0);height=data.readUInt32BE(4);bitDepth=data[8];colorType=data[9];}
+    else if(type==='IDAT'){idat.push(data);}
+    else if(type==='IEND'){break;}
+  }
+  if(colorType!==6||bitDepth!==8)return{width,height,colorType,bitDepth,note:'nieoczekiwany format PNG (nie RGBA8) - nie liczę pikseli'};
+  const raw=require('zlib').inflateSync(Buffer.concat(idat));
+  const stride=width*4;let nonTransparent=0;
+  for(let y=0;y<height;y++){
+    const rowStart=y*(stride+1)+1;
+    for(let x=0;x<width;x++){if(raw[rowStart+x*4+3]>0)nonTransparent++;}
+  }
+  return{width,height,nonTransparentPixels:nonTransparent,totalPixels:width*height};
+}
+
 async function probeRuFeature(res){
-  // Test rozstrzygający (dokładnie te same parametry, które przeglądarka
-  // użytkownika faktycznie wysłała i dostała 200 OK - z devtools) -
-  // sprawdzamy GetFeatureInfo zamiast GetMap, żeby dostać czytelną
-  // odpowiedź tekstową zamiast obrazka.
+  // Test rozstrzygający: pobieramy prawdziwy obrazek GetMap (dokładnie ten
+  // sam bbox co przeglądarka użytkownika) i sprawdzamy, czy jest na nim
+  // COKOLWIEK narysowane (piksele nieprzezroczyste), zamiast zgadywać
+  // po samym rozmiarze pliku - GetFeatureInfo ta usługa najwyraźniej ignoruje.
   const bbox='717217.4651776128,472158.5895873528,718020.4772003035,473068.7580743565';
   const layers='APP.MPZP.WOpracowaniu,APP.MPZP.WTrakciePrzyjmowania,APP.MPZP.PrawnieWiazacyLubRealizowany';
-  const url='https://rejestr-urbanistyczny.gov.pl/uslugi-sieciowe/wms-mpzp/ows?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetFeatureInfo'
-    +'&LAYERS='+encodeURIComponent(layers)+'&QUERY_LAYERS='+encodeURIComponent(layers)
-    +'&STYLES=,,&CRS=EPSG:2180&BBOX='+bbox+'&WIDTH=688&HEIGHT=607&I=344&J=303'
-    +'&INFO_FORMAT=text/xml&FEATURE_COUNT=20&FORMAT=image/png&TRANSPARENT=TRUE';
+  const url='https://rejestr-urbanistyczny.gov.pl/uslugi-sieciowe/wms-mpzp/ows?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap'
+    +'&LAYERS='+encodeURIComponent(layers)+'&STYLES=,,&CRS=EPSG:2180&BBOX='+bbox
+    +'&WIDTH=688&HEIGHT=607&FORMAT=image/png&TRANSPARENT=TRUE';
   const result={requestUrl:url};
   try{
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
     const r=await fetch(url,{signal:controller.signal,headers:{'User-Agent':'Mozilla/5.0 (compatible; MAPA-probe/1.0)'}});
     clearTimeout(timer);
-    const text=await r.text();
-    result.status=r.status;result.contentType=r.headers.get('content-type');result.length=text.length;result.body=text.slice(0,3000);
+    const buf=Buffer.from(await r.arrayBuffer());
+    result.status=r.status;result.contentType=r.headers.get('content-type');result.byteLength=buf.length;
+    if(result.contentType&&result.contentType.includes('image/png')){
+      result.pixelAnalysis=pngNonTransparentPixels(buf);
+    }else{
+      result.bodyPreview=buf.toString('utf8',0,1000);
+    }
   }catch(e){result.error=e.name==='AbortError'?'Timeout':e.message}
   return send(res,200,'application/json; charset=utf-8',JSON.stringify(result,null,2));
 }
