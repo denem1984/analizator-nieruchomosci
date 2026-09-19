@@ -121,6 +121,34 @@ async function planLayersCapabilities(res){
   return send(res,200,'application/json; charset=utf-8',JSON.stringify({pogUchwalone,pogProjektowane,studium},null,2));
 }
 
+async function probeRejestrUrbanistyczny(res){
+  // Rejestr Urbanistyczny (uruchomiony 1 lipca 2026) zastępuje stare usługi
+  // GUGiK do planowania przestrzennego - te stare mają zniknąć po wrześniu 2026.
+  // Ta funkcja: (1) pobiera stronę publikacji RU i szuka w niej linków WMS,
+  // (2) sprawdza kilka prawdopodobnych adresów usługi na mapy.geoportal.gov.pl.
+  const result={published:null,candidates:{}};
+  try{
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
+    const r=await fetch('https://rejestr-urbanistyczny.gov.pl/published',{signal:controller.signal,headers:{'User-Agent':'MAPA RU discover/1.0'}});
+    clearTimeout(timer);
+    const text=await r.text();
+    const wmsLinks=Array.from(new Set(Array.from(text.matchAll(/https?:\/\/[^\s"'<>]+(?:wms|WMS|wss)[^\s"'<>]*/g)).map(m=>m[0]))).slice(0,25);
+    result.published={status:r.status,contentType:r.headers.get('content-type'),length:text.length,wmsLinksFound:wmsLinks};
+  }catch(e){result.published={error:e.name==='AbortError'?'Timeout':e.message}}
+  const candidates=[
+    'https://mapy.geoportal.gov.pl/wss/ext/RejestrUrbanistyczny',
+    'https://mapy.geoportal.gov.pl/wss/ext/RejestrUrbanistycznyMPZP',
+    'https://mapy.geoportal.gov.pl/wss/ext/RejestrUrbanistycznyPOG',
+    'https://mapy.geoportal.gov.pl/wss/ext/RU',
+    'https://mapy.geoportal.gov.pl/wss/ext/AktyPlanowaniaPrzestrzennego',
+    'https://mapy.geoportal.gov.pl/wss/ext/PlanowaniePrzestrzenne'
+  ];
+  for(const url of candidates){
+    result.candidates[url]=await probeWmsLayers(url);
+  }
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify(result,null,2));
+}
+
 async function scanGrupaRejestrowa(reqUrl,res){
   // NARZĘDZIE JEDNORAZOWE: sprawdza, ile polskich powiatów faktycznie
   // udostępnia pole "grupa rejestrowa" w swojej usłudze WFS działek.
@@ -817,5 +845,5 @@ async function wfs(reqUrl,res){
   return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'WFS nie zwrócił danych GeoJSON/GML.',status:out.status,contentType:out.ct,preview:(out.text||'').slice(0,500)}));
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
