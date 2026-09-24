@@ -217,7 +217,7 @@ async function probeRuJsBundle(res){
         const js=await rJs.text();
         const apiPaths=Array.from(new Set(Array.from(js.matchAll(/["'`](\/[a-zA-Z0-9_\-]*api[a-zA-Z0-9_\-\/]*)["'`]/gi)).map(m=>m[1]))).slice(0,25);
         const idApiPaths=Array.from(new Set(Array.from(js.matchAll(/["'`]([a-zA-Z0-9_\-\/]*(?:mpzp|dzialk|przeznacz|strefa|geoserver)[a-zA-Z0-9_\-\/]*)["'`]/gi)).map(m=>m[1]))).slice(0,25);
-        result[full]={length:js.length,apiPaths,idApiPaths};
+        result[full]={length:js.length,apiPaths,idApiPaths,preview:js.length<2000?js:undefined};
       }catch(e){result[full]={error:e.message}}
     }
   }catch(e){result.error=e.message}
