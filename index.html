@@ -123,7 +123,7 @@
         allowed = (data || []).some(row => row.slug === APP_SLUG);
       }
 
-      if (!allowed) throw new Error("app_denied");
+      if (!allowed) throw new Error("app_denied");\n\n      try{await sb.rpc("log_user_event",{p_event_type:"app_open",p_app_slug:APP_SLUG})}catch(_){}
 
       window.DENEM_AUTH = {
         authorized: true,
