@@ -253,6 +253,51 @@ async function probeRuJsBundle(res){
 }
 
 
+function pngColorStats(buf){
+  let pos=8,width=0,height=0,bitDepth=0,colorType=0;const idat=[];
+  while(pos<buf.length){
+    const len=buf.readUInt32BE(pos);pos+=4;
+    const type=buf.toString('ascii',pos,pos+4);pos+=4;
+    const data=buf.slice(pos,pos+len);pos+=len;pos+=4;
+    if(type==='IHDR'){width=data.readUInt32BE(0);height=data.readUInt32BE(4);bitDepth=data[8];colorType=data[9];}
+    else if(type==='IDAT'){idat.push(data);}
+    else if(type==='IEND'){break;}
+  }
+  if(colorType!==6||bitDepth!==8)return{width,height,colorType,bitDepth,note:'nieoczekiwany format PNG'};
+  const raw=require('zlib').inflateSync(Buffer.concat(idat));
+  const stride=width*4;const colors=new Set();let nonTransparent=0;
+  for(let y=0;y<height;y++){
+    const rowStart=y*(stride+1)+1;
+    for(let x=0;x<width;x++){
+      const o=rowStart+x*4,a=raw[o+3];
+      if(a>0){nonTransparent++;if(colors.size<64)colors.add(raw[o]+','+raw[o+1]+','+raw[o+2]);}
+    }
+  }
+  return{width,height,nonTransparentPixels:nonTransparent,totalPixels:width*height,distinctColors:colors.size,sampleColors:Array.from(colors).slice(0,20)};
+}
+
+async function probeRuZoomedColors(res){
+  // Hipoteza: usługa MPZP/POG renderuje kolorowe strefy z symbolami TYLKO przy
+  // dużym przybliżeniu (mały bbox), a przy oddaleniu pokazuje jedynie granicę
+  // planu - dokładnie to, co widzieliśmy. Test: ten sam, już potwierdzony
+  // punkt (Gdańsk), ale bbox 15x mniejszy niż poprzednio (ok. 150x150m
+  // zamiast 800x900m).
+  const cx=717618.5,cy=472613,half=75;
+  const bbox=[cx-half,cy-half,cx+half,cy+half].join(',');
+  const layers='APP.MPZP.WOpracowaniu,APP.MPZP.WTrakciePrzyjmowania,APP.MPZP.PrawnieWiazacyLubRealizowany';
+  const url='https://rejestr-urbanistyczny.gov.pl/uslugi-sieciowe/wms-mpzp/ows?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap'
+    +'&LAYERS='+encodeURIComponent(layers)+'&STYLES=,,&CRS=EPSG:2180&BBOX='+bbox
+    +'&WIDTH=800&HEIGHT=800&FORMAT=image/png&TRANSPARENT=TRUE';
+  const result={requestUrl:url,bboxMetry:half*2+'x'+half*2};
+  try{
+    const r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; MAPA-probe/1.0)'}});
+    const buf=Buffer.from(await r.arrayBuffer());
+    result.status=r.status;result.contentType=r.headers.get('content-type');
+    if((r.headers.get('content-type')||'').includes('image/png'))result.colorStats=pngColorStats(buf);
+  }catch(e){result.error=e.message}
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify(result,null,2));
+}
+
 async function probeRuFeatureInfo(res){
   // Punkt zapytania bierzemy z realnego trafienia w piksel (nie zgadujemy środka
   // obrazka) - dzięki temu wiemy na pewno, że pytamy o miejsce, gdzie coś jest.
@@ -1075,5 +1120,5 @@ async function wfs(reqUrl,res){
   return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'WFS nie zwrócił danych GeoJSON/GML.',status:out.status,contentType:out.ct,preview:(out.text||'').slice(0,500)}));
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);if(u.pathname==='/api/ru-pog-info-test')return probeRuPogAndInfo(res);if(u.pathname==='/api/ru-featureinfo-test')return probeRuFeatureInfo(res);if(u.pathname==='/api/mpzp-info')return mpzpInfo(req.url,res);if(u.pathname==='/api/ru-plan-details-test')return probeRuPlanDetails(res);if(u.pathname==='/api/ru-jsbundle-test')return probeRuJsBundle(res);if(u.pathname==='/api/kiut-styles-test')return probeKiutStyles(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);if(u.pathname==='/api/ru-pog-info-test')return probeRuPogAndInfo(res);if(u.pathname==='/api/ru-featureinfo-test')return probeRuFeatureInfo(res);if(u.pathname==='/api/mpzp-info')return mpzpInfo(req.url,res);if(u.pathname==='/api/ru-plan-details-test')return probeRuPlanDetails(res);if(u.pathname==='/api/ru-jsbundle-test')return probeRuJsBundle(res);if(u.pathname==='/api/kiut-styles-test')return probeKiutStyles(res);if(u.pathname==='/api/ru-zoomed-colors-test')return probeRuZoomedColors(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
