@@ -348,13 +348,7 @@ async function colorTestAtOldGugik(cx,cy,half,baseUrl,layers,version){
   }catch(e){return{error:e.message,requestUrl:u.href}}
 }
 
-async function probeOldKimpzpFeatureInfo(res){
-  // Ten sam punkt co poprzednio (Lomza, dzialka 29/24) ale tym razem:
-  // najpierw pobieramy GetMap (wiemy ze ma tresc), znajdujemy kilka
-  // nieprzezroczystych pikseli w roznych miejscach obrazka, i probujemy
-  // GetFeatureInfo dokladnie na kazdym z nich (X/Y to piksele tego samego
-  // obrazka, wiec nie trzeba przeliczac na wspolrzedne mapy) - az trafimy.
-  const cx=700574.9286528735,cy=593912.0060046804,half=80;
+async function tryOldKimpzpFeatureInfoAt(cx,cy,half){
   const bbox=[cx-half,cy-half,cx+half,cy+half].join(',');
   const layers='plany,raster,wektor-str,wektor-lzb,wektor-pow,wektor-lin,wektor-pkt,granice';
   const W=600,H=600;
@@ -368,8 +362,6 @@ async function probeOldKimpzpFeatureInfo(res){
   try{
     const rMap=await fetch(mapUrl.href,{headers:{'User-Agent':'Mozilla/5.0 (compatible; MAPA-probe/1.0)'}});
     const buf=Buffer.from(await rMap.arrayBuffer());
-    // zbieramy nieprzezroczyste piksele w siatce co 40px, zeby miec kilka
-    // rozrzuconych kandydatow zamiast tylko pierwszego trafienia
     let pos=8,width=0,height=0,bitDepth=0,colorType=0;const idat=[];
     while(pos<buf.length){
       const len=buf.readUInt32BE(pos);pos+=4;
@@ -385,9 +377,9 @@ async function probeOldKimpzpFeatureInfo(res){
       for(let y=20;y<height;y+=40){
         const rowStart=y*(stride+1)+1;
         for(let x=20;x<width;x+=40){
-          if(raw[rowStart+x*4+3]>200){candidates.push({x,y});if(candidates.length>=8)break}
+          if(raw[rowStart+x*4+3]>200){candidates.push({x,y});if(candidates.length>=5)break}
         }
-        if(candidates.length>=8)break;
+        if(candidates.length>=5)break;
       }
     }
     result.mapStatus=rMap.status;result.candidatesFound=candidates.length;
@@ -405,11 +397,17 @@ async function probeOldKimpzpFeatureInfo(res){
       const r=await fetch(u.href,{headers:{'User-Agent':'Mozilla/5.0 (compatible; MAPA-probe/1.0)'}});
       const text=await r.text();
       const hit=!/brak wyniku/i.test(text);
-      result.attempts.push({pixel:c,status:r.status,length:text.length,hit,body:text.slice(0,2000)});
+      result.attempts.push({pixel:c,status:r.status,length:text.length,hit,body:text.slice(0,1500)});
       if(hit)break;
     }catch(e){result.attempts.push({pixel:c,error:e.message})}
   }
-  return send(res,200,'application/json; charset=utf-8',JSON.stringify(result,null,2));
+  return result;
+}
+
+async function probeOldKimpzpFeatureInfo(res){
+  const lomza=await tryOldKimpzpFeatureInfoAt(700574.9286528735,593912.0060046804,80);
+  const gizycko=await tryOldKimpzpFeatureInfoAt(681773.259065,689006.9807,80);
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify({lomza,gizycko},null,2));
 }
 
 async function probeOldGugikStillAlive(res){
