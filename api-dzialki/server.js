@@ -349,29 +349,67 @@ async function colorTestAtOldGugik(cx,cy,half,baseUrl,layers,version){
 }
 
 async function probeOldKimpzpFeatureInfo(res){
-  // Punkt: Łomża, działka 29/24 (ta sama, na której użytkownik pokazał
-  // ucięty symbol "4MN") - sprawdzamy, czy stara usługa KIMPZP zwraca
-  // przez GetFeatureInfo opis/znaczenie strefy pod tym symbolem.
+  // Ten sam punkt co poprzednio (Lomza, dzialka 29/24) ale tym razem:
+  // najpierw pobieramy GetMap (wiemy ze ma tresc), znajdujemy kilka
+  // nieprzezroczystych pikseli w roznych miejscach obrazka, i probujemy
+  // GetFeatureInfo dokladnie na kazdym z nich (X/Y to piksele tego samego
+  // obrazka, wiec nie trzeba przeliczac na wspolrzedne mapy) - az trafimy.
   const cx=700574.9286528735,cy=593912.0060046804,half=80;
   const bbox=[cx-half,cy-half,cx+half,cy+half].join(',');
   const layers='plany,raster,wektor-str,wektor-lzb,wektor-pow,wektor-lin,wektor-pkt,granice';
-  const results={};
-  for(const infoFormat of['text/xml','text/plain','text/html','application/json']){
+  const W=600,H=600;
+  const result={attempts:[]};
+  const mapUrl=new URL('https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaMiejscowychPlanowZagospodarowaniaPrzestrzennego');
+  mapUrl.searchParams.set('SERVICE','WMS');mapUrl.searchParams.set('VERSION','1.1.1');mapUrl.searchParams.set('REQUEST','GetMap');
+  mapUrl.searchParams.set('LAYERS',layers);mapUrl.searchParams.set('SRS','EPSG:2180');mapUrl.searchParams.set('BBOX',bbox);
+  mapUrl.searchParams.set('WIDTH',String(W));mapUrl.searchParams.set('HEIGHT',String(H));
+  mapUrl.searchParams.set('FORMAT','image/png');mapUrl.searchParams.set('TRANSPARENT','TRUE');
+  let candidates=[];
+  try{
+    const rMap=await fetch(mapUrl.href,{headers:{'User-Agent':'Mozilla/5.0 (compatible; MAPA-probe/1.0)'}});
+    const buf=Buffer.from(await rMap.arrayBuffer());
+    // zbieramy nieprzezroczyste piksele w siatce co 40px, zeby miec kilka
+    // rozrzuconych kandydatow zamiast tylko pierwszego trafienia
+    let pos=8,width=0,height=0,bitDepth=0,colorType=0;const idat=[];
+    while(pos<buf.length){
+      const len=buf.readUInt32BE(pos);pos+=4;
+      const type=buf.toString('ascii',pos,pos+4);pos+=4;
+      const data=buf.slice(pos,pos+len);pos+=len;pos+=4;
+      if(type==='IHDR'){width=data.readUInt32BE(0);height=data.readUInt32BE(4);bitDepth=data[8];colorType=data[9];}
+      else if(type==='IDAT'){idat.push(data);}
+      else if(type==='IEND'){break;}
+    }
+    if(colorType===6&&bitDepth===8){
+      const raw=require('zlib').inflateSync(Buffer.concat(idat));
+      const stride=width*4;
+      for(let y=20;y<height;y+=40){
+        const rowStart=y*(stride+1)+1;
+        for(let x=20;x<width;x+=40){
+          if(raw[rowStart+x*4+3]>200){candidates.push({x,y});if(candidates.length>=8)break}
+        }
+        if(candidates.length>=8)break;
+      }
+    }
+    result.mapStatus=rMap.status;result.candidatesFound=candidates.length;
+  }catch(e){result.mapError=e.message;}
+  for(const c of candidates){
     const u=new URL('https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaMiejscowychPlanowZagospodarowaniaPrzestrzennego');
     u.searchParams.set('SERVICE','WMS');u.searchParams.set('VERSION','1.1.1');u.searchParams.set('REQUEST','GetFeatureInfo');
     u.searchParams.set('LAYERS',layers);u.searchParams.set('QUERY_LAYERS',layers);
     u.searchParams.set('SRS','EPSG:2180');u.searchParams.set('BBOX',bbox);
-    u.searchParams.set('WIDTH','600');u.searchParams.set('HEIGHT','600');
-    u.searchParams.set('X','300');u.searchParams.set('Y','300');
-    u.searchParams.set('INFO_FORMAT',infoFormat);u.searchParams.set('FEATURE_COUNT','10');
+    u.searchParams.set('WIDTH',String(W));u.searchParams.set('HEIGHT',String(H));
+    u.searchParams.set('X',String(c.x));u.searchParams.set('Y',String(c.y));
+    u.searchParams.set('INFO_FORMAT','text/html');u.searchParams.set('FEATURE_COUNT','10');
     u.searchParams.set('FORMAT','image/png');u.searchParams.set('TRANSPARENT','TRUE');
     try{
       const r=await fetch(u.href,{headers:{'User-Agent':'Mozilla/5.0 (compatible; MAPA-probe/1.0)'}});
       const text=await r.text();
-      results[infoFormat]={status:r.status,contentType:r.headers.get('content-type'),length:text.length,body:text.slice(0,3000)};
-    }catch(e){results[infoFormat]={error:e.message}}
+      const hit=!/brak wyniku/i.test(text);
+      result.attempts.push({pixel:c,status:r.status,length:text.length,hit,body:text.slice(0,2000)});
+      if(hit)break;
+    }catch(e){result.attempts.push({pixel:c,error:e.message})}
   }
-  return send(res,200,'application/json; charset=utf-8',JSON.stringify(results,null,2));
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify(result,null,2));
 }
 
 async function probeOldGugikStillAlive(res){
