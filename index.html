@@ -410,7 +410,9 @@ async function addLayerSnapshotToReport(){
   msg("Przechwytuje widok mapy...","info");
   try{
     const mapEl=document.getElementById("map");
-    const canvas=await html2canvas(mapEl,{useCORS:true,allowTaint:false,logging:false});
+    map.invalidateSize();
+    await new Promise(r=>setTimeout(r,350));
+    const canvas=await html2canvas(mapEl,{useCORS:true,allowTaint:false,logging:false,scale:1});
     const dataUrl=canvas.toDataURL("image/png");
     reportLayers.push({activeKeys:active,width:canvas.width,height:canvas.height,dataUrl,label:active.length?active.map(k=>LAYER_LABELS[k]||k).join(" + "):"Widok mapy"});
     renderReportLists();
@@ -553,17 +555,20 @@ async function generatePdf(){
       doc.setFont("NotoSans","bold");doc.setFontSize(10);doc.text("Ogolny slownik oznaczen w planach miejscowych:",margin,y);y+=5;
       doc.setFont("NotoSans","normal");doc.setFontSize(7.5);doc.setTextColor(120);
       const note=doc.splitTextToSize("Lista pogladowa, niezalezna od tego co dokladnie widac na obrazie powyzej - dokladne znaczenie zawsze ustala konkretna uchwala planu.",imgW);
-      doc.text(note,margin,y);y+=4*note.length+2;
+      doc.text(note,margin,y);y+=4*note.length+3;
       doc.setTextColor(0);doc.setFontSize(8.5);
-      for(const pair of MPZP_LEGEND_TEXT){
-        const code=pair[0],label=pair[1];
-        ensureSpace(5);
-        doc.setFont("NotoSans","bold");doc.text(code,margin,y);
-        doc.setFont("NotoSans","normal");
-        const lines=doc.splitTextToSize(label,imgW-16);
-        doc.text(lines,margin+16,y);
-        y+=4.3*lines.length;
-      }
+      doc.autoTable({
+        startY:y,
+        margin:{left:margin,right:margin},
+        tableWidth:imgW,
+        theme:"grid",
+        styles:{font:"NotoSans",fontSize:8,cellPadding:1.8,valign:"middle"},
+        columnStyles:{0:{fontStyle:"bold",cellWidth:32},1:{cellWidth:imgW-32}},
+        head:[["Oznaczenie","Znaczenie"]],
+        headStyles:{font:"NotoSans",fontStyle:"bold",fillColor:[29,78,216]},
+        body:MPZP_LEGEND_TEXT
+      });
+      y=doc.lastAutoTable.finalY+4;
     }
   }
   doc.save("raport-nieruchomosc-"+new Date().toISOString().slice(0,10)+".pdf");
