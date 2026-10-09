@@ -404,6 +404,40 @@ async function addParcelToReport(latlng){
   }catch(e){msg("Nie udalo sie dodac dzialki do raportu.","err")}
 }
 
+function flattenLeafletTransforms(clonedDoc){
+  // Leaflet pozycjonuje kafelki, kontury (SVG) i etykiety przez CSS translate3d.
+  // html2canvas potrafi zle zlozyc takie przesuniecia (warstwy rastrowe i
+  // wektorowe lądują w roznych miejscach). Na KOPII dokumentu (uzywanej tylko do
+  // zrzutu) zamieniamy czyste przesuniecia na zwykle left/top - zywa mapa bez zmian.
+  const win=clonedDoc.defaultView,root=clonedDoc.getElementById("map");
+  if(!win||!root)return;
+  const all=[root].concat(Array.from(root.querySelectorAll("*")));
+  const jobs=[];
+  for(const el of all){
+    if(!el.style)continue;
+    const inSvg=el.closest&&el.closest("svg");
+    if(inSvg&&inSvg!==el)continue;
+    const cs=win.getComputedStyle(el);
+    const tr=cs.transform;
+    if(!tr||tr==="none")continue;
+    let a,b,c,d,tx,ty,m=tr.match(/^matrix\(([^)]+)\)$/);
+    if(m){const v=m[1].split(",").map(parseFloat);a=v[0];b=v[1];c=v[2];d=v[3];tx=v[4];ty=v[5]}
+    else{
+      m=tr.match(/^matrix3d\(([^)]+)\)$/);
+      if(!m)continue;
+      const v=m[1].split(",").map(parseFloat);
+      a=v[0];b=v[1];c=v[4];d=v[5];tx=v[12];ty=v[13];
+    }
+    if(Math.abs(a-1)>1e-6||Math.abs(d-1)>1e-6||Math.abs(b)>1e-6||Math.abs(c)>1e-6)continue;
+    jobs.push({el:el,tx:tx||0,ty:ty||0,pos:cs.position,left:parseFloat(cs.left),top:parseFloat(cs.top)});
+  }
+  for(const j of jobs){
+    if(j.pos==="static")j.el.style.position="relative";
+    j.el.style.transform="none";
+    j.el.style.left=((isNaN(j.left)?0:j.left)+j.tx)+"px";
+    j.el.style.top=((isNaN(j.top)?0:j.top)+j.ty)+"px";
+  }
+}
 async function addLayerSnapshotToReport(){
   const candidateKeys=["osm","esri","kieg","own","kimp","pogu","pogp","stud","kiut"];
   const active=candidateKeys.filter(k=>document.getElementById(k)&&document.getElementById(k).checked);
@@ -412,7 +446,7 @@ async function addLayerSnapshotToReport(){
     const mapEl=document.getElementById("map");
     map.invalidateSize();
     await new Promise(r=>setTimeout(r,350));
-    const canvas=await html2canvas(mapEl,{useCORS:true,allowTaint:false,logging:false,scale:1});
+    const canvas=await html2canvas(mapEl,{useCORS:true,allowTaint:false,logging:false,scale:1,onclone:flattenLeafletTransforms});
     const dataUrl=canvas.toDataURL("image/png");
     reportLayers.push({activeKeys:active,width:canvas.width,height:canvas.height,dataUrl,label:active.length?active.map(k=>LAYER_LABELS[k]||k).join(" + "):"Widok mapy"});
     renderReportLists();
