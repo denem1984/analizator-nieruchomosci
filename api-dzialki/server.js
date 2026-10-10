@@ -1547,5 +1547,97 @@ async function probeIgeoplan(res){
   return send(res,200,'application/json; charset=utf-8',JSON.stringify(result,null,2));
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);if(u.pathname==='/api/ru-pog-info-test')return probeRuPogAndInfo(res);if(u.pathname==='/api/ru-featureinfo-test')return probeRuFeatureInfo(res);if(u.pathname==='/api/mpzp-info')return mpzpInfo(req.url,res);if(u.pathname==='/api/report-snapshot')return reportSnapshot(req.url,res);if(u.pathname==='/api/ru-plan-details-test')return probeRuPlanDetails(res);if(u.pathname==='/api/ru-jsbundle-test')return probeRuJsBundle(res);if(u.pathname==='/api/kiut-styles-test')return probeKiutStyles(res);if(u.pathname==='/api/ru-zoomed-colors-test')return probeRuZoomedColors(res);if(u.pathname==='/api/ru-confirmed-examples-test')return probeRuConfirmedExamples(res);if(u.pathname==='/api/old-gugik-alive-test')return probeOldGugikStillAlive(res);if(u.pathname==='/api/old-kimpzp-featureinfo-test')return probeOldKimpzpFeatureInfo(res);if(u.pathname==='/api/kiut-colors-test')return probeKiutColors(res);if(u.pathname==='/api/emapa-pog-probe')return probeEmapaPog(res);if(u.pathname==='/api/emapa-featureinfo-probe')return probeEmapaFeatureInfo(res);if(u.pathname==='/api/igeoplan-probe')return probeIgeoplan(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+const httpsCore=require('https');
+function rawGetOnce(urlStr,insecure){
+  return new Promise(resolve=>{
+    try{
+      const u=new URL(urlStr);
+      const req=httpsCore.request({hostname:u.hostname,port:u.port||443,path:u.pathname+u.search,method:'GET',
+        headers:{'User-Agent':'Mozilla/5.0 (compatible; MAPA-probe/1.0)','Accept':'*/*'},rejectUnauthorized:!insecure,timeout:25000},r=>{
+        const chunks=[];
+        r.on('data',c=>chunks.push(c));
+        r.on('end',()=>resolve({status:r.statusCode,headers:r.headers,body:Buffer.concat(chunks)}));
+      });
+      req.on('timeout',()=>req.destroy(new Error('timeout')));
+      req.on('error',e=>resolve({error:e.code||e.message,message:e.message}));
+      req.end();
+    }catch(e){resolve({error:e.message})}
+  });
+}
+async function rawGet(urlStr){
+  const r=await rawGetOnce(urlStr,false);
+  if(r.error&&/CERT|SIGNATURE|ISSUER|SELF_SIGNED|EXPIRED|HOSTNAME|TLS|SSL/i.test(String(r.error)+' '+String(r.message))){
+    const r2=await rawGetOnce(urlStr,true);
+    r2.tlsProblem=r.error;r2.insecureRetry=true;
+    return r2;
+  }
+  return r;
+}
+async function nationalCaps(url){
+  const u=new URL(url);
+  u.searchParams.set('SERVICE','WMS');u.searchParams.set('REQUEST','GetCapabilities');u.searchParams.set('VERSION','1.1.1');
+  const r=await rawGet(u.href);
+  if(r.error)return{url,error:r.error,message:r.message};
+  const xml=r.body.toString('utf8');
+  const crs=Array.from(new Set(Array.from(xml.matchAll(/<(?:CRS|SRS)>([^<]+)<\/(?:CRS|SRS)>/gi)).flatMap(m=>m[1].trim().split(/\s+/)))).slice(0,30);
+  const starts=Array.from(xml.matchAll(/<Layer\b([^>]*)>/g));
+  const layers=starts.map((m,i)=>{
+    const seg=xml.slice(m.index,i+1<starts.length?starts[i+1].index:xml.length);
+    return{name:(seg.match(/<Name>([^<]+)<\/Name>/)||[])[1],queryable:/queryable="1"/.test(m[1])};
+  }).slice(0,40);
+  return{url,status:r.status,tlsProblem:r.tlsProblem,insecureRetry:!!r.insecureRetry,cors:r.headers['access-control-allow-origin']||null,contentType:r.headers['content-type'],length:xml.length,crs,layers,preview:xml.length<800?xml:undefined};
+}
+async function nationalFeatureInfo(base,layer,cx,cy,half,formats){
+  const bbox=[cx-half,cy-half,cx+half,cy+half].join(',');
+  const mk=(req)=>{
+    const u=new URL(base);
+    u.searchParams.set('SERVICE','WMS');u.searchParams.set('VERSION','1.1.1');u.searchParams.set('REQUEST',req);
+    u.searchParams.set('LAYERS',layer);u.searchParams.set('SRS','EPSG:2180');u.searchParams.set('BBOX',bbox);
+    u.searchParams.set('WIDTH','600');u.searchParams.set('HEIGHT','600');
+    u.searchParams.set('FORMAT','image/png');u.searchParams.set('TRANSPARENT','TRUE');u.searchParams.set('STYLES','');
+    return u;
+  };
+  const out={base,layer};
+  const m=await rawGet(mk('GetMap').href);
+  if(m.error){out.mapError=m.error;out.mapMessage=m.message;return out;}
+  out.mapStatus=m.status;out.mapContentType=m.headers['content-type'];out.mapCors=m.headers['access-control-allow-origin']||null;out.mapBytes=m.body.length;
+  if(m.tlsProblem)out.tlsProblem=m.tlsProblem;
+  if((out.mapContentType||'').includes('image/png')){
+    try{
+      const png=PNG.sync.read(m.body);let opaque=0;
+      for(let i=0;i<png.data.length;i+=4){if(png.data[i+3]>200&&!(png.data[i]>=235&&png.data[i+1]>=235&&png.data[i+2]>=235))opaque++;}
+      out.opaquePixels=opaque;
+    }catch(e){out.pngError=e.message}
+  }else out.mapPreview=m.body.toString('utf8',0,300);
+  out.tries=[];
+  for(const fmt of formats){
+    const u=mk('GetFeatureInfo');
+    u.searchParams.set('QUERY_LAYERS',layer);u.searchParams.set('X','300');u.searchParams.set('Y','300');
+    u.searchParams.set('INFO_FORMAT',fmt);u.searchParams.set('FEATURE_COUNT','5');
+    const r=await rawGet(u.href);
+    out.tries.push({format:fmt,status:r.status,contentType:r.headers&&r.headers['content-type'],length:r.body?r.body.length:0,body:r.body?r.body.toString('utf8').slice(0,1500):undefined,error:r.error});
+  }
+  return out;
+}
+async function probeNationalWms(res){
+  // Trzy krajowe adresy z DevTools uzytkownika (e-mapa): POG obowiazujace, POG projekty, MPZP.
+  // Sprawdzamy: czy backend sie z nimi laczy (i dlaczego nie), jakie CRS (3857?), CORS, queryable,
+  // oraz GetFeatureInfo w SRODKU dzialki (poprzedni test MPZP trafil w narysowany piksel na brzegu).
+  const lomza={cx:700574.93,cy:593912.0},ostroda={cx:564317.16,cy:648736.98};
+  const nat={pog_ob:'https://igeoplan.pl/cgi-bin/pog_ob',pog_proj:'https://igeoplan.pl/cgi-bin/pog',mpzp:'https://wms16.epodgik.pl/cgi-bin/int_mpzp'};
+  const result={};
+  const caps=await Promise.all(Object.entries(nat).map(async e=>[e[0],await nationalCaps(e[1])]));
+  result.caps=Object.fromEntries(caps);
+  result.featureInfo={};
+  result.featureInfo.pog_ob_lomza=await nationalFeatureInfo(nat.pog_ob,'strefaplanistyczna',lomza.cx,lomza.cy,40,['text/xml','text/html']);
+  result.featureInfo.pog_projekty_ostroda=await nationalFeatureInfo(nat.pog_proj,'strefaplanistyczna',ostroda.cx,ostroda.cy,40,['text/xml']);
+  result.featureInfo.mpzp_krajowy_lomza_rysunki=await nationalFeatureInfo(nat.mpzp,'app.RysunkiAktuPlanowania.MPZP',lomza.cx,lomza.cy,40,['text/xml','text/html']);
+  result.featureInfo.mpzp_krajowy_lomza_akt=await nationalFeatureInfo(nat.mpzp,'app.AktPlanowaniaPrzestrzennego.MPZP',lomza.cx,lomza.cy,40,['text/xml']);
+  const vm='https://vmpzp.igeomap.pl/cgi-bin/plany/200702';
+  for(const l of['str','lay63','app.AktPlanowaniaPrzestrzennego.MPZP'])
+    result.featureInfo['mpzp_gmina_lomza_'+l]=await nationalFeatureInfo(vm,l,lomza.cx,lomza.cy,40,['text/xml','text/html']);
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify(result,null,2));
+}
+
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);if(u.pathname==='/api/ru-pog-info-test')return probeRuPogAndInfo(res);if(u.pathname==='/api/ru-featureinfo-test')return probeRuFeatureInfo(res);if(u.pathname==='/api/mpzp-info')return mpzpInfo(req.url,res);if(u.pathname==='/api/report-snapshot')return reportSnapshot(req.url,res);if(u.pathname==='/api/ru-plan-details-test')return probeRuPlanDetails(res);if(u.pathname==='/api/ru-jsbundle-test')return probeRuJsBundle(res);if(u.pathname==='/api/kiut-styles-test')return probeKiutStyles(res);if(u.pathname==='/api/ru-zoomed-colors-test')return probeRuZoomedColors(res);if(u.pathname==='/api/ru-confirmed-examples-test')return probeRuConfirmedExamples(res);if(u.pathname==='/api/old-gugik-alive-test')return probeOldGugikStillAlive(res);if(u.pathname==='/api/old-kimpzp-featureinfo-test')return probeOldKimpzpFeatureInfo(res);if(u.pathname==='/api/kiut-colors-test')return probeKiutColors(res);if(u.pathname==='/api/emapa-pog-probe')return probeEmapaPog(res);if(u.pathname==='/api/emapa-featureinfo-probe')return probeEmapaFeatureInfo(res);if(u.pathname==='/api/igeoplan-probe')return probeIgeoplan(res);if(u.pathname==='/api/national-wms-probe')return probeNationalWms(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
