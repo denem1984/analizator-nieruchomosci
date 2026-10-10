@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Diagnostyka usług WMS</title>
+<style>
+body{font-family:Arial,sans-serif;font-size:13px;margin:12px;color:#0f172a}
+h2{margin:0 0 6px}
+.card{border:1px solid #cbd5e1;border-radius:8px;padding:8px;margin:10px 0;max-width:470px}
+.ok{color:#166534}.bad{color:#b91c1c}
+.url{font-size:10px;color:#64748b;word-break:break-all}
+.chk{background:repeating-conic-gradient(#e2e8f0 0 25%,#fff 0 50%) 0 0/16px 16px;display:inline-block;margin-top:6px}
+img{display:block;width:300px;height:300px}
+</style>
+</head>
+<body>
+<h2>Diagnostyka usług WMS</h2>
+<p>Strona sama wykonuje testy w Twojej przeglądarce. Poczekaj kilkanaście sekund, aż wszystkie karty się wypełnią, i zrób zrzut(y) ekranu całej strony.</p>
+<div id="out"></div>
+<script>
+const BASE_OB='https://igeoplan.pl/cgi-bin/pog_ob';
+const BASE_PR='https://igeoplan.pl/cgi-bin/pog';
+const BASE_MP='https://wms16.epodgik.pl/cgi-bin/int_mpzp';
+const BASE_GM='https://wms.e-mapa.net/cgi-bin/pog/200702';
+function mk(base,layers,styles,srs,bbox){
+  return base+'?VERSION=1.1.1&SERVICE=WMS&REQUEST=GetMap&LAYERS='+layers+'&SRS='+srs+'&BBOX='+bbox+
+    '&WIDTH=400&HEIGHT=400&TRANSPARENT=TRUE&FORMAT=image/png&styles='+styles;
+}
+const POG='strefaplanistyczna,strefaplanistyczna_labels,granice_planu';
+const LZ={s2180:'700514.93,593852,700634.93,593972',s3857:'2449151.36,7014890.49,2449351.55,7015090.69',s4326:'22.001101,53.172073,22.002899,53.173151'};
+const OS={s2180:'564257.16,648676.98,564377.16,648796.98',s3857:'2223450.01,7113336.46,2223652.71,7113539.15'};
+const tests=[
+ ['POG obowiazujace (igeoplan pog_ob) - Lomza - EPSG:2180',mk(BASE_OB,POG,',,','EPSG:2180',LZ.s2180)],
+ ['POG obowiazujace (igeoplan pog_ob) - Lomza - EPSG:3857',mk(BASE_OB,POG,',,','EPSG:3857',LZ.s3857)],
+ ['POG obowiazujace (igeoplan pog_ob) - Lomza - EPSG:4326',mk(BASE_OB,POG,',,','EPSG:4326',LZ.s4326)],
+ ['POG projekty (igeoplan pog) - Ostroda - EPSG:2180',mk(BASE_PR,POG,',,','EPSG:2180',OS.s2180)],
+ ['POG projekty (igeoplan pog) - Ostroda - EPSG:3857',mk(BASE_PR,POG,',,','EPSG:3857',OS.s3857)],
+ ['MPZP krajowy (epodgik int_mpzp) - Lomza - EPSG:3857',mk(BASE_MP,'app.RysunkiAktuPlanowania.MPZP','','EPSG:3857',LZ.s3857)],
+ ['MPZP krajowy (epodgik int_mpzp) - Lomza - EPSG:2180',mk(BASE_MP,'app.RysunkiAktuPlanowania.MPZP','','EPSG:2180',LZ.s2180)],
+ ['KONTROLA: POG per gmina (wms.e-mapa.net pog/200702) - EPSG:2180',mk(BASE_GM,'app.StrefaPlanistyczna,app.StrefaPlanistyczna-etykiety',',','EPSG:2180',LZ.s2180)]
+];
+const out=document.getElementById('out');
+function line(el,html,cls){const d=document.createElement('div');d.className=cls||'';d.innerHTML=html;el.appendChild(d);return d}
+function loadImg(url,cors){
+  return new Promise(res=>{
+    const im=new Image();
+    if(cors)im.crossOrigin='anonymous';
+    const t=setTimeout(()=>res({ok:false,err:'przekroczono czas (30 s)'}),30000);
+    im.onload=()=>{clearTimeout(t);res({ok:true,im})};
+    im.onerror=()=>{clearTimeout(t);res({ok:false,err:'blad (brak obrazka, blad serwera albo brak CORS)'})};
+    im.src=url;
+  });
+}
+function countOpaque(im){
+  try{
+    const c=document.createElement('canvas');c.width=im.naturalWidth;c.height=im.naturalHeight;
+    const x=c.getContext('2d');x.drawImage(im,0,0);
+    const d=x.getImageData(0,0,c.width,c.height).data;
+    let n=0;for(let i=3;i<d.length;i+=4)if(d[i]>200)n++;
+    return n+' z '+(c.width*c.height);
+  }catch(e){return 'nie da sie odczytac ('+e.name+')'}
+}
+async function runImageTest(name,url){
+  const card=document.createElement('div');card.className='card';out.appendChild(card);
+  line(card,'<b>'+name+'</b>');
+  line(card,url,'url');
+  const a=await loadImg(url,false);
+  line(card,'Wyswietlenie (bez CORS): '+(a.ok?'OK, obrazek '+a.im.naturalWidth+'x'+a.im.naturalHeight:'BLAD - '+a.err),a.ok?'ok':'bad');
+  const b=await loadImg(url,true);
+  if(b.ok)line(card,'CORS (canvas / PDF): OTWARTY; nieprzezroczyste piksele: '+countOpaque(b.im),'ok');
+  else line(card,'CORS (canvas / PDF): BRAK - '+b.err,'bad');
+  if(a.ok){const w=document.createElement('div');w.className='chk';const im=document.createElement('img');im.src=url;w.appendChild(im);card.appendChild(w)}
+}
+async function runCaps(base){
+  const card=document.createElement('div');card.className='card';out.appendChild(card);
+  line(card,'<b>GetCapabilities z przegladarki: '+base+'</b>');
+  try{
+    const r=await fetch(base+'?SERVICE=WMS&REQUEST=GetCapabilities&VERSION=1.1.1');
+    const x=await r.text();
+    const srs=[...new Set([...x.matchAll(/<SRS>([^<]+)<\/SRS>/g)].flatMap(m=>m[1].trim().split(/\s+/)))];
+    const names=[...x.matchAll(/<Layer[^>]*>\s*<Name>([^<]+)<\/Name>/g)].map(m=>m[1]);
+    line(card,'OK, status '+r.status+'<br>Uklady: '+srs.join(', ')+'<br>Warstwy: '+names.join(', '),'ok');
+  }catch(e){
+    line(card,'BLAD: '+e.message+' (zwykle brak CORS dla zapytan skryptowych albo blad sieci)','bad');
+  }
+}
+tests.forEach(t=>runImageTest(t[0],t[1]));
+[BASE_OB,BASE_PR,BASE_MP].forEach(runCaps);
+</script>
+</body>
+</html>
