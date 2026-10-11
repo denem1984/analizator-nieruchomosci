@@ -1,4 +1,4 @@
-<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Analizator Nieruchomości</title><script src="https://cdn.tailwindcss.com"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body{height:100%;margin:0;font-family:Arial,sans-serif}#app{height:100vh;display:flex}#side{width:30%;min-width:330px;overflow:auto;background:#f8fafc;border-right:1px solid #cbd5e1}#map{width:70%;height:100vh}.box{background:#fff;border:1px solid #e2e8f0;border-radius:10px;margin:10px;padding:12px}label{display:block;font-size:12px;font-weight:700;color:#475569;margin:7px 0 4px}select,input{box-sizing:border-box;width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;background:#fff}select:disabled,input:disabled{background:#e2e8f0;color:#94a3b8}button{width:100%;padding:10px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700}button:disabled{background:#94a3b8}button:not(:disabled){background:#16a34a!important;color:#fff!important;cursor:pointer}.status{display:none;padding:8px;margin-top:8px;border-radius:8px;font-size:12px}.show{display:block}.info{background:#eff6ff;color:#1d4ed8}.ok{background:#f0fdf4;color:#166534}.err{background:#fef2f2;color:#991b1b}.row{display:flex;justify-content:space-between;border-bottom:1px solid #f1f5f9;padding:6px 0;font-size:12px}.layer{display:flex;gap:8px;align-items:center;font-size:13px;margin:8px 0}.layer input{width:16px}.ownrow{display:flex;gap:7px;align-items:center;font-size:11px;margin:5px 0}.sq{width:14px;height:14px;border:1px solid #555}.hidden{display:none!important}.small{font-size:10px;color:#64748b;margin-top:8px}.classitem{margin-top:5px;padding:5px 7px;background:#f8fafc;border-radius:6px}.classcode{font-weight:700;color:#0f172a}.classdesc{font-size:11px;color:#475569;margin-top:2px}.layer-group{margin:8px 0}.layer-group-header{display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer;user-select:none}.layer-group-header b{color:#0f172a}.expand-icon{width:18px;height:18px;flex:0 0 18px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #94a3b8;border-radius:4px;font-weight:700;font-size:13px;color:#475569;background:#fff}.layer-group-children{margin:4px 0 0 24px;border-left:2px solid #e2e8f0;padding-left:10px}.kiutline{width:24px;height:4px;border-radius:2px;display:inline-block;flex:0 0 24px}@media(max-width:650px){#app{display:block;height:auto}#side{width:100%;height:55vh;min-width:0}#map{width:100%;height:45vh}}.parcel-label{font-family:Arial,sans-serif;font-weight:600;color:#104e8b;white-space:nowrap;text-align:center;line-height:1;text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff;pointer-events:none;transform:translate(-50%,-50%);will-change:font-size}.parcel-label-pane{z-index:450!important}
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Analizator Nieruchomości</title><script src="https://cdn.tailwindcss.com"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body{height:100%;margin:0;font-family:Arial,sans-serif}#app{height:100vh;display:flex}#side{width:30%;min-width:330px;overflow:auto;background:#f8fafc;border-right:1px solid #cbd5e1}#map{width:70%;height:100vh}.box{background:#fff;border:1px solid #e2e8f0;border-radius:10px;margin:10px;padding:12px}label{display:block;font-size:12px;font-weight:700;color:#475569;margin:7px 0 4px}select,input{box-sizing:border-box;width:100%;padding:9px;border:1px solid #cbd5e1;border-radius:8px;background:#fff}select:disabled,input:disabled{background:#e2e8f0;color:#94a3b8}button{width:100%;padding:10px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:700}button:disabled{background:#94a3b8}button:not(:disabled){background:#16a34a!important;color:#fff!important;cursor:pointer}.status{display:none;padding:8px;margin-top:8px;border-radius:8px;font-size:12px}.show{display:block}.info{background:#eff6ff;color:#1d4ed8}.ok{background:#f0fdf4;color:#166534}.err{background:#fef2f2;color:#991b1b}.row{display:flex;justify-content:space-between;border-bottom:1px solid #f1f5f9;padding:6px 0;font-size:12px}.layer{display:flex;gap:8px;align-items:center;font-size:13px;margin:8px 0}.layer input{width:16px}.ownrow{display:flex;gap:7px;align-items:center;font-size:11px;margin:5px 0}.sq{width:14px;height:14px;border:1px solid #555}.hidden{display:none!important}.small{font-size:10px;color:#64748b;margin-top:8px}.classitem{margin-top:5px;padding:5px 7px;background:#f8fafc;border-radius:6px}.classcode{font-weight:700;color:#0f172a}.classdesc{font-size:11px;color:#475569;margin-top:2px}.layer-group{margin:8px 0}.layer-group-header{display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer;user-select:none}.layer-group-header b{color:#0f172a}.expand-icon{width:18px;height:18px;flex:0 0 18px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #94a3b8;border-radius:4px;font-weight:700;font-size:13px;color:#475569;background:#fff}.layer-group-children{margin:4px 0 0 24px;border-left:2px solid #e2e8f0;padding-left:10px}.kiutline{width:24px;height:4px;border-radius:2px;display:inline-block;flex:0 0 24px}@media(max-width:650px){#app{display:block;height:auto}#side{width:100%;height:55vh;min-width:0}#map{width:100%;height:45vh}}.parcel-label{font-family:Arial,sans-serif;font-weight:600;color:#104e8b;white-space:nowrap;text-align:center;line-height:1;text-shadow:-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff,1px 1px 0 #fff;pointer-events:none;transform:translate(-50%,-50%);will-change:font-size}.parcel-label-pane{z-index:450!important}
 .leaflet-kiutPane-pane img{filter:drop-shadow(0 0 .6px rgba(0,0,0,.85)) drop-shadow(0 0 .6px rgba(0,0,0,.85)) saturate(1.7) contrast(1.25)}
 </style>
 <style>
@@ -177,7 +177,99 @@
 <div class="ctx-item" data-action="streetview" style="padding:8px 12px;border-radius:5px;cursor:pointer;white-space:nowrap">📍 Street View</div>
 <div class="ctx-item" data-action="add-parcel" style="padding:8px 12px;border-radius:5px;cursor:pointer;white-space:nowrap">📄 Dodaj działkę do raportu</div>
 <div class="ctx-item" data-action="add-layer" style="padding:8px 12px;border-radius:5px;cursor:pointer;white-space:nowrap">🗺️ Dodaj warstwę do raportu</div>
-</div></div><script>const F="https://mapy.geoportal.gov.pl/wss/ims/maps/PRG_gugik_wyszukiwarka/FeatureServer/",U="https://uldk.gugik.gov.pl/",E="https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow",V={"02":"dolnośląskie","04":"kujawsko-pomorskie","06":"lubelskie","08":"lubuskie","10":"łódzkie","12":"małopolskie","14":"mazowieckie","16":"opolskie","18":"podkarpackie","20":"podlaskie","22":"pomorskie","24":"śląskie","26":"świętokrzyskie","28":"warmińsko-mazurskie","30":"wielkopolskie","32":"zachodniopomorskie"};const map=L.map("map",{maxZoom:22}).setView([52.07,19.48],6);map.createPane("basePane");map.getPane("basePane").style.zIndex=200;map.createPane("overlayPaneApp");map.getPane("overlayPaneApp").style.zIndex=400;map.createPane("kiutPane");map.getPane("kiutPane").style.zIndex=410;const osm=L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{pane:"basePane",maxZoom:22,maxNativeZoom:19,attribution:"© OpenStreetMap"}).addTo(map),esri=L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{pane:"basePane",maxZoom:22,maxNativeZoom:19,attribution:"Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community"}),layers={kieg:L.tileLayer.wms(E,{pane:"overlayPaneApp",layers:"dzialki",format:"image/png",transparent:true,opacity:.95,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1}),kimp:L.tileLayer.wms("https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaMiejscowychPlanowZagospodarowaniaPrzestrzennego",{pane:"overlayPaneApp",layers:"plany,raster,wektor-str,wektor-lzb,wektor-pow,wektor-lin,wektor-pkt,granice",format:"image/png",transparent:true,opacity:.6,tileSize:1024,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1}),pogu:L.tileLayer.wms("https://rejestr-urbanistyczny.gov.pl/uslugi-sieciowe/wms-pog/ows",{pane:"overlayPaneApp",layers:"APP.POG.PrawnieWiazacyLubRealizowany",version:"1.3.0",crs:L.CRS.EPSG4326,format:"image/png",transparent:true,opacity:.6,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1}),pogp:L.tileLayer.wms("https://rejestr-urbanistyczny.gov.pl/uslugi-sieciowe/wms-pog/ows",{pane:"overlayPaneApp",layers:"APP.POG.WOpracowaniu,APP.POG.WTrakciePrzyjmowania",styles:",",version:"1.3.0",crs:L.CRS.EPSG4326,format:"image/png",transparent:true,opacity:.6,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1}),stud:L.tileLayer.wms("https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaStudiumKierunkowZagospodarowaniaPrzestrzennego",{pane:"overlayPaneApp",layers:"studium,gminy",format:"image/png",transparent:true,opacity:.6,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1}),kiut:L.tileLayer.wms("https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaUzbrojeniaTerenu",{pane:"kiutPane",layers:"gesut,kgesut_dane,przewod_urzadzenia,przewod_specjalny,przewod_niezidentyfikowany,przewod_elektroenergetyczny,przewod_telekomunikacyjny,przewod_gazowy,przewod_cieplowniczy,przewod_kanalizacyjny,przewod_wodociagowy",format:"image/png",transparent:true,opacity:.9,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1}),own:L.layerGroup()};function bind(id,l,box){document.getElementById(id).onchange=e=>{(e.target.checked?map.addLayer:map.removeLayer).call(map,l);if(box)document.getElementById(box).classList.toggle("hidden",!e.target.checked)}}bind("osm",osm);bind("esri",esri);Object.entries(layers).forEach(([k,l])=>bind(k,l,k==="kiut"?"kiutL":k==="own"?"ownL":null));const ownershipApi="https://analizator-nieruchomosci.onrender.com/api/ownership-national",ownershipVector=L.geoJSON([], {pane:"overlayPaneApp",style:f=>{const g=String(f?.properties?.GRUPA_REJESTROWA||"").trim();const c={"1":"#ff7777","2":"#b30000","3":"#7f0000","4":"#90ee90","5":"#006400","6":"#808000","7":"#ffd92f","8":"#ff9acb","9":"#a66cff","10":"#d8b4fe","11":"#87cefa","12":"#0047ab","13":"#ffb366","14":"#cc6600","15":"#6ec6ff","16":"#9ca3af"}[g]||"#9ca3af";return{color:"#555",weight:0.8,fillColor:c,fillOpacity:.55}}});let ownershipTimer=null,ownershipRequest=0;async function loadOwnershipVector(){if(!document.getElementById("own").checked)return;const my=++ownershipRequest;const b=map.getBounds();const u=new URL(ownershipApi);u.searchParams.set("bbox",`${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`);try{const r=await fetch(u,{headers:{Accept:"application/json"}});if(!r.ok)throw Error("HTTP "+r.status);const data=await r.json();if(my!==ownershipRequest)return;ownershipVector.clearLayers();ownershipVector.addData(data);if(!map.hasLayer(ownershipVector))ownershipVector.addTo(map);enrichMissingGroups(data.features||[],my)}catch(e){console.warn("Mapa własności WFS:",e)}}
+</div></div><script>const F="https://mapy.geoportal.gov.pl/wss/ims/maps/PRG_gugik_wyszukiwarka/FeatureServer/",U="https://uldk.gugik.gov.pl/",E="https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow",V={"02":"dolnośląskie","04":"kujawsko-pomorskie","06":"lubelskie","08":"lubuskie","10":"łódzkie","12":"małopolskie","14":"mazowieckie","16":"opolskie","18":"podkarpackie","20":"podlaskie","22":"pomorskie","24":"śląskie","26":"świętokrzyskie","28":"warmińsko-mazurskie","30":"wielkopolskie","32":"zachodniopomorskie"};const map=L.map("map",{maxZoom:22}).setView([52.07,19.48],6);map.createPane("basePane");map.getPane("basePane").style.zIndex=200;map.createPane("overlayPaneApp");map.getPane("overlayPaneApp").style.zIndex=400;map.createPane("kiutPane");map.getPane("kiutPane").style.zIndex=410;const osm=L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{pane:"basePane",maxZoom:22,maxNativeZoom:19,attribution:"© OpenStreetMap"}).addTo(map),esri=L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{pane:"basePane",maxZoom:22,maxNativeZoom:19,attribution:"Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community"}),layers={kieg:L.tileLayer.wms(E,{pane:"overlayPaneApp",layers:"dzialki",format:"image/png",transparent:true,opacity:.95,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1}),kimp:L.tileLayer.wms("https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaMiejscowychPlanowZagospodarowaniaPrzestrzennego",{pane:"overlayPaneApp",layers:"plany,raster,wektor-str,wektor-lzb,wektor-pow,wektor-lin,wektor-pkt,granice",format:"image/png",transparent:true,opacity:.6,tileSize:1024,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1}),pogu:L.tileLayer.wms("https://rejestr-urbanistyczny.gov.pl/uslugi-sieciowe/wms-pog/ows",{pane:"overlayPaneApp",layers:"APP.POG.PrawnieWiazacyLubRealizowany",version:"1.3.0",crs:L.CRS.EPSG4326,format:"image/png",transparent:true,opacity:.6,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1}),pogp:L.tileLayer.wms("https://rejestr-urbanistyczny.gov.pl/uslugi-sieciowe/wms-pog/ows",{pane:"overlayPaneApp",layers:"APP.POG.WOpracowaniu,APP.POG.WTrakciePrzyjmowania",styles:",",version:"1.3.0",crs:L.CRS.EPSG4326,format:"image/png",transparent:true,opacity:.6,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1}),stud:L.tileLayer.wms("https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaStudiumKierunkowZagospodarowaniaPrzestrzennego",{pane:"overlayPaneApp",layers:"studium,gminy",format:"image/png",transparent:true,opacity:.6,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1}),kiut:L.tileLayer.wms("https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaUzbrojeniaTerenu",{pane:"kiutPane",layers:"gesut,kgesut_dane,przewod_urzadzenia,przewod_specjalny,przewod_niezidentyfikowany,przewod_elektroenergetyczny,przewod_telekomunikacyjny,przewod_gazowy,przewod_cieplowniczy,przewod_kanalizacyjny,przewod_wodociagowy",format:"image/png",transparent:true,opacity:.9,maxZoom:22,updateWhenZooming:false,updateWhenIdle:true,keepBuffer:1}),own:L.layerGroup()};function bind(id,l,box){document.getElementById(id).onchange=e=>{(e.target.checked?map.addLayer:map.removeLayer).call(map,l);if(box)document.getElementById(box).classList.toggle("hidden",!e.target.checked)}}bind("osm",osm);bind("esri",esri);
+/* ===== POG uchwalony: dane gmin (publiczne uslugi WMS per gmina, tylko EPSG:2180) przeliczane w przegladarce na 3857 ===== */
+const EMAPA_POG_BASE="https://wms.e-mapa.net/cgi-bin/pog/";
+const emapaPogExists={};
+const MERC_R=6378137,MERC_ORIGIN=20037508.342789244;
+if(typeof proj4!=="undefined"){proj4.defs("EPSG:2180","+proj=tmerc +lat_0=0 +lon_0=19 +k=0.9993 +x_0=500000 +y_0=-5300000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs")}
+function mercToLL(mx,my){return[mx/MERC_R*180/Math.PI,(2*Math.atan(Math.exp(my/MERC_R))-Math.PI/2)*180/Math.PI]}
+function escHtml(t){return String(t==null?"":t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+async function emapaPogCheck(teryt){
+  if(!teryt)return false;
+  if(teryt in emapaPogExists)return emapaPogExists[teryt];
+  let ok=false;
+  try{const r=await fetch(EMAPA_POG_BASE+teryt+"?SERVICE=WMS&REQUEST=GetCapabilities&VERSION=1.3.0");ok=r.ok}catch(e){ok=false}
+  emapaPogExists[teryt]=ok;
+  return ok;
+}
+const EmapaPogLayer=L.GridLayer.extend({
+  initialize:function(options){L.GridLayer.prototype.initialize.call(this,options);this._teryt=null;this._timer=null},
+  onAdd:function(map){L.GridLayer.prototype.onAdd.call(this,map);map.on("moveend",this._schedule,this);this._schedule()},
+  onRemove:function(map){map.off("moveend",this._schedule,this);clearTimeout(this._timer);L.GridLayer.prototype.onRemove.call(this,map)},
+  _schedule:function(){clearTimeout(this._timer);this._timer=setTimeout(()=>this._refreshTeryt(),500)},
+  _refreshTeryt:async function(){
+    const map=this._map;
+    if(!map||typeof proj4==="undefined"||map.getZoom()<this.options.minZoom)return;
+    const c=map.getCenter();
+    let teryt=null;
+    try{const pi=await parcelInfoAtPoint(c.lng,c.lat);if(pi&&pi.id)teryt=String(pi.id).split("_")[0]}catch(e){}
+    if(!teryt)return;
+    const svc=(await emapaPogCheck(teryt))?teryt:null;
+    if(svc!==this._teryt){this._teryt=svc;this.redraw()}
+  },
+  createTile:function(coords,done){
+    const tile=document.createElement("canvas");tile.width=256;tile.height=256;
+    const teryt=this._teryt;
+    if(!teryt||typeof proj4==="undefined"){setTimeout(()=>done(null,tile),0);return tile}
+    try{
+      const size=2*MERC_ORIGIN/Math.pow(2,coords.z);
+      const minX=-MERC_ORIGIN+coords.x*size,maxY=MERC_ORIGIN-coords.y*size;
+      const to2180=(mx,my)=>proj4("EPSG:4326","EPSG:2180",mercToLL(mx,my));
+      const nw=to2180(minX,maxY),ne=to2180(minX+size,maxY),sw=to2180(minX,maxY-size),se=to2180(minX+size,maxY-size);
+      const Es=[nw[0],ne[0],sw[0],se[0]],Ns=[nw[1],ne[1],sw[1],se[1]];
+      const minE=Math.min.apply(null,Es),maxE=Math.max.apply(null,Es),minN=Math.min.apply(null,Ns),maxN=Math.max.apply(null,Ns);
+      const gx=Math.hypot(ne[0]-nw[0],ne[1]-nw[1])/256;
+      const W=Math.max(16,Math.min(1200,Math.ceil((maxE-minE)/gx))),H=Math.max(16,Math.min(1200,Math.ceil((maxN-minN)/gx)));
+      const sx=(maxE-minE)/W,sy=(maxN-minN)/H;
+      const a11=(ne[0]-nw[0])/256,a12=(sw[0]-nw[0])/256,a21=(ne[1]-nw[1])/256,a22=(sw[1]-nw[1])/256;
+      const det=a11*a22-a12*a21,dE=minE-nw[0],dN=maxN-nw[1];
+      const ta=a22*sx/det,tc=a12*sy/det,te=(a22*dE-a12*dN)/det,tb=-a21*sx/det,td=-a11*sy/det,tf=(-a21*dE+a11*dN)/det;
+      const url=EMAPA_POG_BASE+teryt+"?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS="+encodeURIComponent("app.StrefaPlanistyczna,app.StrefaPlanistyczna-etykiety")+"&STYLES=%2C&SRS=EPSG:2180&BBOX="+[minE,minN,maxE,maxN].map(v=>v.toFixed(2)).join(",")+"&WIDTH="+W+"&HEIGHT="+H+"&FORMAT=image/png&TRANSPARENT=TRUE";
+      const img=new Image();img.crossOrigin="anonymous";
+      img.onload=()=>{try{const ctx=tile.getContext("2d");ctx.setTransform(ta,tb,tc,td,te,tf);ctx.drawImage(img,0,0)}catch(err){}done(null,tile)};
+      img.onerror=()=>done(null,tile);
+      img.src=url;
+    }catch(err){setTimeout(()=>done(null,tile),0)}
+    return tile;
+  }
+});
+const emapaPog=new EmapaPogLayer({pane:"overlayPaneApp",minZoom:13,maxZoom:22,opacity:.6,keepBuffer:1,updateWhenIdle:true,updateWhenZooming:false});
+layers.pogu=L.layerGroup([layers.pogu,emapaPog]);
+async function emapaPogInfoHtml(teryt,latlng){
+  if(typeof proj4==="undefined"||!(await emapaPogCheck(teryt)))return "";
+  const p=proj4("EPSG:4326","EPSG:2180",[latlng.lng,latlng.lat]);
+  const h=20,bbox=[p[0]-h,p[1]-h,p[0]+h,p[1]+h].join(",");
+  const lq="app.StrefaPlanistyczna,app.AktPlanowaniaPrzestrzennego.POG";
+  const u=EMAPA_POG_BASE+teryt+"?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo&LAYERS="+encodeURIComponent(lq)+"&QUERY_LAYERS="+encodeURIComponent(lq)+"&STYLES=%2C&SRS=EPSG:2180&BBOX="+bbox+"&WIDTH=101&HEIGHT=101&X=50&Y=50&INFO_FORMAT=text%2Fxml&FEATURE_COUNT=5&FORMAT=image%2Fpng";
+  const r=await fetch(u);
+  if(!r.ok)return "";
+  const xml=new DOMParser().parseFromString(await r.text(),"text/xml");
+  let out="";
+  xml.querySelectorAll("Layer").forEach(layer=>{
+    const name=layer.getAttribute("name");
+    layer.querySelectorAll("Feature").forEach(f=>{
+      const a={};
+      f.querySelectorAll("Attribute").forEach(x=>{a[x.getAttribute("name")]=x.getAttribute("value")});
+      if(name==="app.StrefaPlanistyczna"){
+        out+="<b>POG – strefa "+escHtml(a.oznaczenie||"")+"</b>"+(a.nazwa?"<br>"+escHtml(a.nazwa):"");
+        if(a.profilPodstawowy)out+="<br><small><b>Profil podstawowy:</b> "+escHtml(a.profilPodstawowy)+"</small>";
+        if(a.profilDodatkowy)out+="<br><small><b>Profil dodatkowy:</b> "+escHtml(a.profilDodatkowy)+"</small>";
+        const par=[];
+        if(a.maksNadziemnaIntensywnoscZabudowy)par.push("maks. intensywność zabudowy "+a.maksNadziemnaIntensywnoscZabudowy);
+        if(a.maksUdzialPowierzchniZabudowy)par.push("maks. powierzchnia zabudowy "+a.maksUdzialPowierzchniZabudowy);
+        if(a.maksWysokoscZabudowy)par.push("maks. wysokość zabudowy "+a.maksWysokoscZabudowy);
+        if(a.minUdzialPowierzchniBiologicznieCzynnej)par.push("min. powierzchnia biologicznie czynna "+a.minUdzialPowierzchniBiologicznieCzynnej);
+        if(par.length)out+="<br><small>"+escHtml(par.join("; "))+"</small>";
+        out+="<br>";
+      }else if(name==="app.AktPlanowaniaPrzestrzennego.POG"){
+        out+="<small>"+escHtml(a.tytul||"Plan ogólny")+(a.obowiazujeOd?" (obowiązuje od "+escHtml(a.obowiazujeOd)+")":"")+(a.status?", "+escHtml(a.status):"")+"</small>";
+      }
+    });
+  });
+  return out;
+}
+Object.entries(layers).forEach(([k,l])=>bind(k,l,k==="kiut"?"kiutL":k==="own"?"ownL":null));const ownershipApi="https://analizator-nieruchomosci.onrender.com/api/ownership-national",ownershipVector=L.geoJSON([], {pane:"overlayPaneApp",style:f=>{const g=String(f?.properties?.GRUPA_REJESTROWA||"").trim();const c={"1":"#ff7777","2":"#b30000","3":"#7f0000","4":"#90ee90","5":"#006400","6":"#808000","7":"#ffd92f","8":"#ff9acb","9":"#a66cff","10":"#d8b4fe","11":"#87cefa","12":"#0047ab","13":"#ffb366","14":"#cc6600","15":"#6ec6ff","16":"#9ca3af"}[g]||"#9ca3af";return{color:"#555",weight:0.8,fillColor:c,fillOpacity:.55}}});let ownershipTimer=null,ownershipRequest=0;async function loadOwnershipVector(){if(!document.getElementById("own").checked)return;const my=++ownershipRequest;const b=map.getBounds();const u=new URL(ownershipApi);u.searchParams.set("bbox",`${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`);try{const r=await fetch(u,{headers:{Accept:"application/json"}});if(!r.ok)throw Error("HTTP "+r.status);const data=await r.json();if(my!==ownershipRequest)return;ownershipVector.clearLayers();ownershipVector.addData(data);if(!map.hasLayer(ownershipVector))ownershipVector.addTo(map);enrichMissingGroups(data.features||[],my)}catch(e){console.warn("Mapa własności WFS:",e)}}
 // MODEL HYBRYDOWY: szybka, zbiorcza metoda (powyżej) koloruje mapę
 // natychmiast tam, gdzie dane są ogólnodostępne (ok. połowa Polski).
 // Dla działek, które wyszły z niej bez grupy (bo dany powiat nie
@@ -339,9 +431,11 @@ function toggleParcelSelection(id){
 map.on("click",async(e)=>{
   const popup=L.popup().setLatLng(e.latlng).setContent("Sprawdzam działkę…").openOn(map);
   let html="";
+  let clickTeryt=null;
   try{
     const pi=await parcelInfoAtPoint(e.latlng.lng,e.latlng.lat);
     if(pi){
+      clickTeryt=String(pi.id).split("_")[0];
       let areaTxt="brak danych";try{areaTxt=pi.area?formatOfficialArea(pi.area):"brak danych"}catch(err){}
       const gv=String(pi.group||"").trim(),gl=GROUP_LABELS[gv];
       const groupTxt=gv?(gl?gv+" – "+gl:gv):"brak danych";
@@ -366,6 +460,9 @@ map.on("click",async(e)=>{
         html+="Brak planu MPZP w tym miejscu (wg Rejestru Urbanistycznego).";
       }
     }catch(err){html+="Nie udało się pobrać informacji o planie.";}
+  }
+  if(document.getElementById("pogu").checked&&clickTeryt){
+    try{const g=await emapaPogInfoHtml(clickTeryt,e.latlng);if(g)html+="<hr style=\"margin:6px 0\">"+g}catch(err){}
   }
   popup.setContent(html);
 });document.getElementById("zagospHeader").onclick=()=>{const c=document.getElementById("zagospChildren"),open=c.classList.toggle("hidden");document.getElementById("zagospIcon").textContent=open?"+":"−"};document.getElementById("parcelOutlineColor").addEventListener("input",e=>{parcelOutlineColor=e.target.value;debugGeom.setStyle({color:parcelOutlineColor})});document.getElementById("selectionColor").addEventListener("input",e=>{selectionColor=e.target.value;selectedParcels.setStyle({color:selectionColor,fillColor:selectionColor})});document.getElementById("clearSelectionBtn").addEventListener("click",()=>{selectedIds.clear();selectedParcels.clearLayers()});document.getElementById("mpzpLegendBtn").addEventListener("click",()=>{document.getElementById("mpzpLegendPanel").classList.toggle("hidden")});
