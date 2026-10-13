@@ -1676,5 +1676,52 @@ async function probeMpzpInfoChain(res){
   return send(res,200,'application/json; charset=utf-8',JSON.stringify(out,null,2));
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);if(u.pathname==='/api/ru-pog-info-test')return probeRuPogAndInfo(res);if(u.pathname==='/api/ru-featureinfo-test')return probeRuFeatureInfo(res);if(u.pathname==='/api/mpzp-info')return mpzpInfo(req.url,res);if(u.pathname==='/api/report-snapshot')return reportSnapshot(req.url,res);if(u.pathname==='/api/ru-plan-details-test')return probeRuPlanDetails(res);if(u.pathname==='/api/ru-jsbundle-test')return probeRuJsBundle(res);if(u.pathname==='/api/kiut-styles-test')return probeKiutStyles(res);if(u.pathname==='/api/ru-zoomed-colors-test')return probeRuZoomedColors(res);if(u.pathname==='/api/ru-confirmed-examples-test')return probeRuConfirmedExamples(res);if(u.pathname==='/api/old-gugik-alive-test')return probeOldGugikStillAlive(res);if(u.pathname==='/api/old-kimpzp-featureinfo-test')return probeOldKimpzpFeatureInfo(res);if(u.pathname==='/api/kiut-colors-test')return probeKiutColors(res);if(u.pathname==='/api/emapa-pog-probe')return probeEmapaPog(res);if(u.pathname==='/api/emapa-featureinfo-probe')return probeEmapaFeatureInfo(res);if(u.pathname==='/api/igeoplan-probe')return probeIgeoplan(res);if(u.pathname==='/api/national-wms-probe')return probeNationalWms(res);if(u.pathname==='/api/mpzp-chain-probe')return probeMpzpInfoChain(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+const mpzpGminaExists=new Map();
+function parseMpzpGfiHtml(html){
+  // Odpowiedz GetFeatureInfo (text/html) publicznej uslugi gminnej MPZP: bloki "<b>pole</b>: wartosc<br/>", rozdzielone <hr/>.
+  const dec=t=>t.replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&#39;/g,"'").trim();
+  const plans=[];
+  for(const part of String(html).split(/<hr\s*\/?>/i)){
+    if(!/<b>/i.test(part))continue;
+    const rec={},links=[];
+    const re=/<b>([^<]+)<\/b>:\s*([\s\S]*?)<br\s*\/?>/gi;
+    let m;
+    while((m=re.exec(part))){
+      const key=m[1].trim(),val=m[2];
+      const a=val.match(/<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);
+      if(a){
+        const href=a[1].replace(/&amp;/g,'&');
+        if(/^https:\/\//i.test(href))links.push({label:dec(a[2])||key,href});
+      }else rec[key]=dec(val);
+    }
+    if(rec.tytul||rec.typPlanu)plans.push({tytul:rec.tytul||'',typPlanu:rec.typPlanu||'',status:rec.status||'',data:rec.data||'',obowiazujeOd:rec.obowiazujeOd||'',links});
+  }
+  return plans.slice(0,3);
+}
+async function mpzpGminaInfo(reqUrl,res){
+  // Informacja o miejscowym planie z PUBLICZNEJ uslugi gminnej (vmpzp.igeomap.pl/cgi-bin/plany/{TERYT6}),
+  // GetFeatureInfo text/html na warstwie app.AktPlanowaniaPrzestrzennego.MPZP. Jedno zapytanie na klikniecie uzytkownika.
+  const q=new URL(reqUrl,'http://x').searchParams;
+  const teryt=String(q.get('teryt')||'');
+  const lat=parseFloat(q.get('lat')),lon=parseFloat(q.get('lon'));
+  const json=(o,code)=>send(res,code||200,'application/json; charset=utf-8',JSON.stringify(o));
+  if(!/^\d{6}$/.test(teryt)||!isFinite(lat)||!isFinite(lon))return json({error:'Zle parametry'},400);
+  if(mpzpGminaExists.get(teryt)===false)return json({exists:false,plans:[]});
+  const d=0.0002;
+  const u=new URL('https://vmpzp.igeomap.pl/cgi-bin/plany/'+teryt);
+  const layer='app.AktPlanowaniaPrzestrzennego.MPZP';
+  u.searchParams.set('SERVICE','WMS');u.searchParams.set('VERSION','1.1.1');u.searchParams.set('REQUEST','GetFeatureInfo');
+  u.searchParams.set('LAYERS',layer);u.searchParams.set('QUERY_LAYERS',layer);u.searchParams.set('SRS','EPSG:4326');
+  u.searchParams.set('BBOX',[lon-d,lat-d,lon+d,lat+d].join(','));u.searchParams.set('WIDTH','101');u.searchParams.set('HEIGHT','101');
+  u.searchParams.set('X','50');u.searchParams.set('Y','50');u.searchParams.set('INFO_FORMAT','text/html');
+  u.searchParams.set('FEATURE_COUNT','5');u.searchParams.set('FORMAT','image/png');u.searchParams.set('STYLES','');
+  const r=await rawGet(u.href);
+  if(r.error)return json({exists:null,plans:[],error:r.error});
+  if(r.status===404){mpzpGminaExists.set(teryt,false);return json({exists:false,plans:[]});}
+  mpzpGminaExists.set(teryt,true);
+  if(r.status!==200)return json({exists:true,plans:[],status:r.status});
+  return json({exists:true,plans:parseMpzpGfiHtml(r.body.toString('utf8'))});
+}
+
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);if(u.pathname==='/api/ru-pog-info-test')return probeRuPogAndInfo(res);if(u.pathname==='/api/ru-featureinfo-test')return probeRuFeatureInfo(res);if(u.pathname==='/api/mpzp-info')return mpzpInfo(req.url,res);if(u.pathname==='/api/report-snapshot')return reportSnapshot(req.url,res);if(u.pathname==='/api/ru-plan-details-test')return probeRuPlanDetails(res);if(u.pathname==='/api/ru-jsbundle-test')return probeRuJsBundle(res);if(u.pathname==='/api/kiut-styles-test')return probeKiutStyles(res);if(u.pathname==='/api/ru-zoomed-colors-test')return probeRuZoomedColors(res);if(u.pathname==='/api/ru-confirmed-examples-test')return probeRuConfirmedExamples(res);if(u.pathname==='/api/old-gugik-alive-test')return probeOldGugikStillAlive(res);if(u.pathname==='/api/old-kimpzp-featureinfo-test')return probeOldKimpzpFeatureInfo(res);if(u.pathname==='/api/kiut-colors-test')return probeKiutColors(res);if(u.pathname==='/api/emapa-pog-probe')return probeEmapaPog(res);if(u.pathname==='/api/emapa-featureinfo-probe')return probeEmapaFeatureInfo(res);if(u.pathname==='/api/igeoplan-probe')return probeIgeoplan(res);if(u.pathname==='/api/national-wms-probe')return probeNationalWms(res);if(u.pathname==='/api/mpzp-chain-probe')return probeMpzpInfoChain(res);if(u.pathname==='/api/mpzp-gmina-info')return mpzpGminaInfo(req.url,res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
