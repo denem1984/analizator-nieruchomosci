@@ -1723,5 +1723,58 @@ async function mpzpGminaInfo(reqUrl,res){
   return json({exists:true,plans:parseMpzpGfiHtml(r.body.toString('utf8'))});
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);if(u.pathname==='/api/ru-pog-info-test')return probeRuPogAndInfo(res);if(u.pathname==='/api/ru-featureinfo-test')return probeRuFeatureInfo(res);if(u.pathname==='/api/mpzp-info')return mpzpInfo(req.url,res);if(u.pathname==='/api/report-snapshot')return reportSnapshot(req.url,res);if(u.pathname==='/api/ru-plan-details-test')return probeRuPlanDetails(res);if(u.pathname==='/api/ru-jsbundle-test')return probeRuJsBundle(res);if(u.pathname==='/api/kiut-styles-test')return probeKiutStyles(res);if(u.pathname==='/api/ru-zoomed-colors-test')return probeRuZoomedColors(res);if(u.pathname==='/api/ru-confirmed-examples-test')return probeRuConfirmedExamples(res);if(u.pathname==='/api/old-gugik-alive-test')return probeOldGugikStillAlive(res);if(u.pathname==='/api/old-kimpzp-featureinfo-test')return probeOldKimpzpFeatureInfo(res);if(u.pathname==='/api/kiut-colors-test')return probeKiutColors(res);if(u.pathname==='/api/emapa-pog-probe')return probeEmapaPog(res);if(u.pathname==='/api/emapa-featureinfo-probe')return probeEmapaFeatureInfo(res);if(u.pathname==='/api/igeoplan-probe')return probeIgeoplan(res);if(u.pathname==='/api/national-wms-probe')return probeNationalWms(res);if(u.pathname==='/api/mpzp-chain-probe')return probeMpzpInfoChain(res);if(u.pathname==='/api/mpzp-gmina-info')return mpzpGminaInfo(req.url,res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+function decodeBody(r){
+  const ct=(r.headers&&r.headers['content-type'])||'';
+  const m=ct.match(/charset=([^;\s]+)/i);
+  const buf=r.body||Buffer.alloc(0);
+  try{return new TextDecoder(m?m[1]:'utf-8').decode(buf)}catch(e){return buf.toString('utf8')}
+}
+function kiegAttrPart(text,part){
+  // ta sama logika co xmlAttrPart w przegladarce
+  const re=/<Attribute\b[^>]*\bName\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/Attribute\s*>/gi;
+  let m;
+  while((m=re.exec(text))){if(m[1].toLowerCase().includes(part.toLowerCase()))return m[2].replace(/^<!\[CDATA\[|\]\]>$/g,'').trim()}
+  return '';
+}
+async function probeKiegRaw(res){
+  // Dlaczego w popupie "Powierzchnia: brak danych" / "Klasouzytki: brak danych" dla dzialki w Lomzy?
+  // Pobieramy SUROWA odpowiedz KIEG (te same parametry co parcelInfoAtPoint) dla Lomzy i dla dzialki-kontroli z Pisza.
+  const E='https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow';
+  const spots={lomza_29_24:'200702_2.0036.29/24',pisz_1_48:'281603_5.0017.1/48'};
+  const out={kiegCaps:await wmsSummary(E),miejsca:{}};
+  for(const[label,id]of Object.entries(spots)){
+    try{
+      const g=await uldkGeom(id);
+      const wktLine=g.lines.find(l=>/POLYGON/i.test(l));
+      const c=wktLine&&wktBboxCenter(wktLine);
+      if(!c){out.miejsca[label]={id,error:'Brak geometrii z ULDK'};continue;}
+      const ll=proj4('EPSG:2180','EPSG:4326',[c.cx,c.cy]);
+      const rec={id,center2180:[c.cx,c.cy],centerLonLat:ll,formats:{}};
+      for(const fmt of['text/xml','text/html','text/plain','application/vnd.ogc.gml']){
+        const span=.0012;
+        const u=new URL(E);
+        const q={SERVICE:'WMS',VERSION:'1.1.1',REQUEST:'GetFeatureInfo',SRS:'EPSG:4326',BBOX:[ll[0]-span,ll[1]-span,ll[0]+span,ll[1]+span].join(','),WIDTH:'1000',HEIGHT:'1000',X:'500',Y:'500',LAYERS:'dzialki',QUERY_LAYERS:'dzialki',INFO_FORMAT:fmt,FORMAT:'image/png',TRANSPARENT:'TRUE'};
+        Object.entries(q).forEach(([k,v])=>u.searchParams.set(k,v));
+        const r=await rawGet(u.href);
+        const body=decodeBody(r);
+        const entry={status:r.status,error:r.error,contentType:r.headers&&r.headers['content-type'],length:body.length};
+        if(fmt==='text/xml'){
+          entry.attributeNames=Array.from(body.matchAll(/<Attribute\b[^>]*\bName\s*=\s*["']([^"']*)["']/gi)).map(m=>m[1]);
+          entry.zTegoWyciagaAplikacja={
+            id:kiegAttrPart(body,'Identyfikator działki'),
+            powierzchnia:kiegAttrPart(body,'Pole pow. w ewidencji gruntów'),
+            grupa:kiegAttrPart(body,'Grupa rejestrowa'),
+            uzytek:kiegAttrPart(body,'Oznaczenie użytku')||kiegAttrPart(body,'Oznaczenie konturu')||kiegAttrPart(body,'Klasoużyt')
+          };
+        }
+        entry.body=body.slice(0,fmt==='text/xml'?6000:2500);
+        rec.formats[fmt]=entry;
+      }
+      out.miejsca[label]=rec;
+    }catch(e){out.miejsca[label]={id,error:e.message}}
+  }
+  return send(res,200,'application/json; charset=utf-8',JSON.stringify(out,null,2));
+}
+
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);if(u.pathname==='/api/ru-pog-info-test')return probeRuPogAndInfo(res);if(u.pathname==='/api/ru-featureinfo-test')return probeRuFeatureInfo(res);if(u.pathname==='/api/mpzp-info')return mpzpInfo(req.url,res);if(u.pathname==='/api/report-snapshot')return reportSnapshot(req.url,res);if(u.pathname==='/api/ru-plan-details-test')return probeRuPlanDetails(res);if(u.pathname==='/api/ru-jsbundle-test')return probeRuJsBundle(res);if(u.pathname==='/api/kiut-styles-test')return probeKiutStyles(res);if(u.pathname==='/api/ru-zoomed-colors-test')return probeRuZoomedColors(res);if(u.pathname==='/api/ru-confirmed-examples-test')return probeRuConfirmedExamples(res);if(u.pathname==='/api/old-gugik-alive-test')return probeOldGugikStillAlive(res);if(u.pathname==='/api/old-kimpzp-featureinfo-test')return probeOldKimpzpFeatureInfo(res);if(u.pathname==='/api/kiut-colors-test')return probeKiutColors(res);if(u.pathname==='/api/emapa-pog-probe')return probeEmapaPog(res);if(u.pathname==='/api/emapa-featureinfo-probe')return probeEmapaFeatureInfo(res);if(u.pathname==='/api/igeoplan-probe')return probeIgeoplan(res);if(u.pathname==='/api/national-wms-probe')return probeNationalWms(res);if(u.pathname==='/api/mpzp-chain-probe')return probeMpzpInfoChain(res);if(u.pathname==='/api/mpzp-gmina-info')return mpzpGminaInfo(req.url,res);if(u.pathname==='/api/kieg-raw-probe')return probeKiegRaw(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
