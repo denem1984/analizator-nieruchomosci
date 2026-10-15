@@ -1023,7 +1023,7 @@ renderReportLists();
   }
   function polygonArea(points){
     if(points.length<3)return 0;
-    const rad=Math.PI/180,R=6378137;
+    const rad=Math.PI/180,R=6371000;
     let sum=0;
     for(let i=0;i<points.length;i++){
       const a=points[i],b=points[(i+1)%points.length];
