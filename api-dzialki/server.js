@@ -1836,5 +1836,63 @@ async function probeKiegGaps(res){
   return send(res,200,'application/json; charset=utf-8',JSON.stringify(out,null,2));
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);if(u.pathname==='/api/ru-pog-info-test')return probeRuPogAndInfo(res);if(u.pathname==='/api/ru-featureinfo-test')return probeRuFeatureInfo(res);if(u.pathname==='/api/mpzp-info')return mpzpInfo(req.url,res);if(u.pathname==='/api/report-snapshot')return reportSnapshot(req.url,res);if(u.pathname==='/api/ru-plan-details-test')return probeRuPlanDetails(res);if(u.pathname==='/api/ru-jsbundle-test')return probeRuJsBundle(res);if(u.pathname==='/api/kiut-styles-test')return probeKiutStyles(res);if(u.pathname==='/api/ru-zoomed-colors-test')return probeRuZoomedColors(res);if(u.pathname==='/api/ru-confirmed-examples-test')return probeRuConfirmedExamples(res);if(u.pathname==='/api/old-gugik-alive-test')return probeOldGugikStillAlive(res);if(u.pathname==='/api/old-kimpzp-featureinfo-test')return probeOldKimpzpFeatureInfo(res);if(u.pathname==='/api/kiut-colors-test')return probeKiutColors(res);if(u.pathname==='/api/emapa-pog-probe')return probeEmapaPog(res);if(u.pathname==='/api/emapa-featureinfo-probe')return probeEmapaFeatureInfo(res);if(u.pathname==='/api/igeoplan-probe')return probeIgeoplan(res);if(u.pathname==='/api/national-wms-probe')return probeNationalWms(res);if(u.pathname==='/api/mpzp-chain-probe')return probeMpzpInfoChain(res);if(u.pathname==='/api/mpzp-gmina-info')return mpzpGminaInfo(req.url,res);if(u.pathname==='/api/kieg-raw-probe')return probeKiegRaw(res);if(u.pathname==='/api/kieg-gaps-probe')return probeKiegGaps(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+
+async function rwdzFeatureInfo(reqUrl,res){
+  const incoming=new URL(reqUrl,'http://localhost');
+  const param=name=>{
+    for(const [key,value] of incoming.searchParams.entries())if(key.toUpperCase()===name)return value;
+    return null;
+  };
+  const allowedLayers=new Set(['pozwolenia_pkt','pozwolenia_POLYGON']);
+  const layersRaw=param('QUERY_LAYERS')||param('LAYERS')||'';
+  const layers=layersRaw.split(',').map(x=>x.trim()).filter(Boolean);
+  const requestedRaw=param('LAYERS');
+  const requested=requestedRaw?requestedRaw.split(',').map(x=>x.trim()).filter(Boolean):layers;
+  if(!layers.length||layers.length>2||layers.some(x=>!allowedLayers.has(x))||
+     requested.length!==layers.length||requested.some((x,i)=>x!==layers[i])){
+    return send(res,400,'application/json; charset=utf-8',JSON.stringify({error:'Nieprawidłowa warstwa RWDZ.'}));
+  }
+  const bboxRaw=param('BBOX')||'';
+  const bbox=bboxRaw.split(',').map(Number);
+  if(bbox.length!==4||bbox.some(x=>!Number.isFinite(x))||
+     bbox.some(x=>Math.abs(x)>20037508.35)||bbox[0]>=bbox[2]||bbox[1]>=bbox[3]){
+    return send(res,400,'application/json; charset=utf-8',JSON.stringify({error:'Nieprawidłowy BBOX EPSG:3857.'}));
+  }
+  const integer=(name,min,max)=>{
+    const value=Number(param(name));
+    return Number.isInteger(value)&&value>=min&&value<=max?value:null;
+  };
+  const width=integer('WIDTH',1,2000),height=integer('HEIGHT',1,2000);
+  const i=integer('I',0,width===null?-1:width-1),j=integer('J',0,height===null?-1:height-1);
+  if(width===null||height===null||i===null||j===null){
+    return send(res,400,'application/json; charset=utf-8',JSON.stringify({error:'Nieprawidłowe wymiary lub piksel zapytania RWDZ.'}));
+  }
+  const target=new URL('https://mapy.geoportal.gov.pl/wss/ext/GlownyUrzadNadzoruBudowlanego/RWDZ-WMS');
+  const params=target.searchParams;
+  params.set('SERVICE','WMS');params.set('VERSION','1.3.0');params.set('REQUEST','GetFeatureInfo');
+  params.set('LAYERS',layers.join(','));params.set('QUERY_LAYERS',layers.join(','));
+  params.set('STYLES',layers.map(()=> 'default').join(','));params.set('CRS','EPSG:3857');
+  params.set('BBOX',bbox.join(','));params.set('WIDTH',String(width));params.set('HEIGHT',String(height));
+  params.set('FORMAT','image/png');params.set('INFO_FORMAT','text/xml');
+  params.set('I',String(i));params.set('J',String(j));params.set('FEATURE_COUNT','5');
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),25000);
+  try{
+    const upstream=await fetch(target.href,{signal:controller.signal,headers:{
+      'User-Agent':'Mozilla/5.0 (compatible; AnalizatorNieruchomosci/1.0)',
+      'Accept':'text/xml, application/xml;q=0.9, */*;q=0.8'
+    }});
+    const body=await upstream.text();
+    clearTimeout(timer);
+    if(!upstream.ok)return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'Usługa RWDZ zwróciła HTTP '+upstream.status}));
+    if(body.length>1500000)return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'Odpowiedź RWDZ przekracza limit rozmiaru.'}));
+    const contentType=upstream.headers.get('content-type')||'application/xml; charset=utf-8';
+    return send(res,200,contentType,body);
+  }catch(e){
+    clearTimeout(timer);
+    const message=e.name==='AbortError'?'Usługa RWDZ przekroczyła limit czasu.':'Nie udało się połączyć z usługą RWDZ.';
+    return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:message}));
+  }
+}
+
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);if(u.pathname==='/api/ru-pog-info-test')return probeRuPogAndInfo(res);if(u.pathname==='/api/ru-featureinfo-test')return probeRuFeatureInfo(res);if(u.pathname==='/api/mpzp-info')return mpzpInfo(req.url,res);if(u.pathname==='/api/report-snapshot')return reportSnapshot(req.url,res);if(u.pathname==='/api/rwdz-feature-info')return rwdzFeatureInfo(req.url,res);if(u.pathname==='/api/ru-plan-details-test')return probeRuPlanDetails(res);if(u.pathname==='/api/ru-jsbundle-test')return probeRuJsBundle(res);if(u.pathname==='/api/kiut-styles-test')return probeKiutStyles(res);if(u.pathname==='/api/ru-zoomed-colors-test')return probeRuZoomedColors(res);if(u.pathname==='/api/ru-confirmed-examples-test')return probeRuConfirmedExamples(res);if(u.pathname==='/api/old-gugik-alive-test')return probeOldGugikStillAlive(res);if(u.pathname==='/api/old-kimpzp-featureinfo-test')return probeOldKimpzpFeatureInfo(res);if(u.pathname==='/api/kiut-colors-test')return probeKiutColors(res);if(u.pathname==='/api/emapa-pog-probe')return probeEmapaPog(res);if(u.pathname==='/api/emapa-featureinfo-probe')return probeEmapaFeatureInfo(res);if(u.pathname==='/api/igeoplan-probe')return probeIgeoplan(res);if(u.pathname==='/api/national-wms-probe')return probeNationalWms(res);if(u.pathname==='/api/mpzp-chain-probe')return probeMpzpInfoChain(res);if(u.pathname==='/api/mpzp-gmina-info')return mpzpGminaInfo(req.url,res);if(u.pathname==='/api/kieg-raw-probe')return probeKiegRaw(res);if(u.pathname==='/api/kieg-gaps-probe')return probeKiegGaps(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
