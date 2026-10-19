@@ -724,7 +724,7 @@ async function rwdzInfoHtml(e){
 }
 map.on("click",async(e)=>{
   if(window.__DENEM_MAP_MEASUREMENT_ACTIVE)return;
-  const popup=L.popup({maxHeight:Math.max(160,Math.min(560,Math.floor(window.innerHeight*.72)))}).setLatLng(e.latlng).setContent("Sprawdzam działkę…").openOn(map);
+  const popup=L.popup({maxHeight:Math.max(80,Math.min(560,Math.floor(window.innerHeight*.72),Math.floor(map.getSize().y*.68)))}).setLatLng(e.latlng).setContent("Sprawdzam działkę…").openOn(map);
   let html="";
   let clickTeryt=null;
   try{
