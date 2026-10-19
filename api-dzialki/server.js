@@ -1729,6 +1729,68 @@ function decodeBody(r){
   const buf=r.body||Buffer.alloc(0);
   try{return new TextDecoder(m?m[1]:'utf-8').decode(buf)}catch(e){return buf.toString('utf8')}
 }
+function parseDzinfo(html){
+  const decode=value=>String(value||"").replace(/&amp;/gi,"&").replace(/&quot;/gi,'"').replace(/&lt;/gi,"<").replace(/&gt;/gi,">").replace(/&nbsp;/gi," ").replace(/&#39;|&apos;/gi,"'").replace(/&#(\d+);/g,(_,n)=>{const cp=Number(n);return cp<=0x10ffff?String.fromCodePoint(cp):" "}).replace(/&#x([0-9a-f]+);/gi,(_,n)=>{const cp=parseInt(n,16);return cp<=0x10ffff?String.fromCodePoint(cp):" "});
+  const text=decode(String(html||"").replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi," ").replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi," ").replace(/<[^>]*>/g," ")).replace(/[\s ]+/g," ").trim();
+  const markers=Array.from(text.matchAll(/\bInformacje\s+z\s+([^\s]+)/gi));
+  const fullSections=markers.map((m,i)=>({
+    tytul:m[1].replace(/[.,;:]+$/g,""),
+    tekst:text.slice(m.index+m[0].length,i+1<markers.length?markers[i+1].index:text.length).trim()
+  }));
+  const sekcje=fullSections.map(s=>({tytul:s.tytul,tekst:s.tekst.slice(0,1200)}));
+  const section=fullSections.find(s=>s.tytul.toUpperCase()==="MPZP");
+  if(!section)return{sekcje,mpzp:null};
+  const safeUrl=value=>{const url=String(value||"").trim();return /^https:\/\//i.test(url)?url:null};
+  const textUrl=re=>{const m=section.tekst.match(re);return safeUrl(m&&m[1])};
+  const anchors=Array.from(String(html||"").matchAll(/<a\b[^>]*\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>/gi))
+    .map(m=>safeUrl(decode(m[1]||m[2]||m[3]||""))).filter(Boolean);
+  const fallback=re=>anchors.find(url=>re.test(url))||null;
+  const numerUchwaly=(section.tekst.match(/Numer\s+uchwa[łl]y\s+(.+?)\s+Data\s+uchwa[łl]y/i)||[])[1]||null;
+  const dataUchwaly=(section.tekst.match(/Data\s+uchwa[łl]y\s+(\S+)/i)||[])[1]||null;
+  const teryt=(section.tekst.match(/Teryt\s+(\d+)/i)||[])[1]||null;
+  const nazwaAktu=(section.tekst.match(/Nazwa\s+aktu\s+(.+?)\s+Tre[śs][ćc]\s+uchwa[łl]y/i)||[])[1]||null;
+  const linki={
+    portal:textUrl(/Portal\s+mapowy\s+(\S+)/i),
+    uchwala:textUrl(/Tre[śs][ćc]\s+uchwa[łl]y\s+(\S+)/i),
+    rysunek:textUrl(/Geotiff\s+(\S+)/i),
+    gml:textUrl(/\bGml\s+(\S+)/i),
+    legenda:textUrl(/Legenda\s+(\S+)/i)
+  };
+  linki.uchwala=linki.uchwala||fallback(/pelna_tresc|\.pdf/i);
+  linki.rysunek=linki.rysunek||fallback(/tiff/i);
+  linki.gml=linki.gml||fallback(/gml/i);
+  linki.legenda=linki.legenda||fallback(/legenda/i);
+  const strefy=[];
+  const re=/Etykieta\s+(.+?)\s+Opis\s+(.+?)(?:\s+Ustalenia\s+(\S+))?(?=\s+Etykieta\s|\s+Przeznaczenie\s|$)/gi;
+  let m;
+  while((m=re.exec(section.tekst))){strefy.push({etykieta:m[1].trim(),opis:m[2].trim(),ustalenia:safeUrl(m[3])});}
+  if(strefy.length&&!strefy[0].ustalenia)strefy[0].ustalenia=fallback(/getUstaleniaSzczegolowe/i);
+  return{sekcje,mpzp:{numerUchwaly,dataUchwaly,teryt,nazwaAktu:nazwaAktu&&nazwaAktu.trim(),linki,strefy}};
+}
+
+const dzinfoCache=new Map();
+const DZINFO_TTL_MS=6*60*60*1000;
+async function dzinfoInfo(reqUrl,res){
+  const q=new URL(reqUrl,"http://localhost").searchParams;
+  const id=String(q.get("id")||"");
+  const debug=q.get("debug")==="1";
+  const json=(value,status=200)=>send(res,status,"application/json; charset=utf-8",JSON.stringify(value));
+  if(id.length>60||!/^\d{6,7}_\d\.\d{4}\.[0-9A-Za-z_.\/-]+$/.test(id))return json({error:"Zly identyfikator"},400);
+  const now=Date.now(),cached=dzinfoCache.get(id);
+  if(cached&&cached.expiresAt>now){dzinfoCache.delete(id);dzinfoCache.set(id,cached);return json(debug?Object.assign({},cached.result,{htmlHead:cached.htmlHead}):cached.result)}
+  if(cached)dzinfoCache.delete(id);
+  const url=new URL("https://uldk.gugik.gov.pl/dzinfo.php");
+  url.searchParams.set("dzialka",id);
+  let response;
+  try{response=await rawGet(url.href)}catch(e){return json({id,error:"Nie udało się pobrać raportu GUGiK."})}
+  if(response.error)return json({id,error:"Nie udało się pobrać raportu GUGiK: "+String(response.error)});
+  if(response.status!==200)return json({id,error:"Raport GUGiK zwrócił HTTP "+response.status+"."});
+  let html,result;try{html=decodeBody(response);result=Object.assign({id},parseDzinfo(html))}catch(e){return json({id,error:"Nie udało się odczytać raportu GUGiK."})}
+  dzinfoCache.set(id,{expiresAt:now+DZINFO_TTL_MS,result,htmlHead:html.slice(0,4000)});
+  while(dzinfoCache.size>500)dzinfoCache.delete(dzinfoCache.keys().next().value);
+  return json(debug?Object.assign({},result,{htmlHead:html.slice(0,4000)}):result);
+}
+
 function kiegAttrPart(text,part){
   // ta sama logika co xmlAttrPart w przegladarce
   const re=/<Attribute\b[^>]*\bName\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/Attribute\s*>/gi;
@@ -1894,5 +1956,5 @@ async function rwdzFeatureInfo(reqUrl,res){
   }
 }
 
-const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);if(u.pathname==='/api/ru-pog-info-test')return probeRuPogAndInfo(res);if(u.pathname==='/api/ru-featureinfo-test')return probeRuFeatureInfo(res);if(u.pathname==='/api/mpzp-info')return mpzpInfo(req.url,res);if(u.pathname==='/api/report-snapshot')return reportSnapshot(req.url,res);if(u.pathname==='/api/rwdz-feature-info')return rwdzFeatureInfo(req.url,res);if(u.pathname==='/api/ru-plan-details-test')return probeRuPlanDetails(res);if(u.pathname==='/api/ru-jsbundle-test')return probeRuJsBundle(res);if(u.pathname==='/api/kiut-styles-test')return probeKiutStyles(res);if(u.pathname==='/api/ru-zoomed-colors-test')return probeRuZoomedColors(res);if(u.pathname==='/api/ru-confirmed-examples-test')return probeRuConfirmedExamples(res);if(u.pathname==='/api/old-gugik-alive-test')return probeOldGugikStillAlive(res);if(u.pathname==='/api/old-kimpzp-featureinfo-test')return probeOldKimpzpFeatureInfo(res);if(u.pathname==='/api/kiut-colors-test')return probeKiutColors(res);if(u.pathname==='/api/emapa-pog-probe')return probeEmapaPog(res);if(u.pathname==='/api/emapa-featureinfo-probe')return probeEmapaFeatureInfo(res);if(u.pathname==='/api/igeoplan-probe')return probeIgeoplan(res);if(u.pathname==='/api/national-wms-probe')return probeNationalWms(res);if(u.pathname==='/api/mpzp-chain-probe')return probeMpzpInfoChain(res);if(u.pathname==='/api/mpzp-gmina-info')return mpzpGminaInfo(req.url,res);if(u.pathname==='/api/kieg-raw-probe')return probeKiegRaw(res);if(u.pathname==='/api/kieg-gaps-probe')return probeKiegGaps(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
+const server=http.createServer((req,res)=>{if(req.method==='OPTIONS')return send(res,204,'text/plain','');try{const u=new URL(req.url,'http://localhost');if(u.pathname==='/health')return send(res,200,'application/json; charset=utf-8',JSON.stringify({ok:true,service:'MAPA production parcel labels API',format:'GeoJSON',outputCrs:'EPSG:4326',ownershipProxy:true,ownershipCountyDiagnostic:true}));if(u.pathname==='/api/wfs')return wfs(req.url,res);if(u.pathname==='/api/ownership-national')return ownershipNational(req.url,res);if(u.pathname==='/api/ownership')return ownership(req.url,res);if(u.pathname==='/api/ownership-county')return ownershipCounty(req.url,res);if(u.pathname==='/api/ownership-live')return ownershipLive(req.url,res);if(u.pathname==='/api/probe-powiat')return probePowiat(req.url,res);if(u.pathname==='/api/probe-national-fields')return probeNationalWfsFields(res);if(u.pathname==='/api/ownership-county-probe')return ownershipCountyProbe(req.url,res);if(u.pathname==='/api/piski-capabilities')return piskiCapabilities(res);if(u.pathname==='/api/mapa-wlasnosci-capabilities')return mapaWlasnosciCapabilities(res);if(u.pathname==='/api/scan-grupa-rejestrowa')return scanGrupaRejestrowa(req.url,res);if(u.pathname==='/api/plan-layers-capabilities')return planLayersCapabilities(res);if(u.pathname==='/api/ru-discover')return probeRejestrUrbanistyczny(res);if(u.pathname==='/api/ru-feature-test')return probeRuFeature(res);if(u.pathname==='/api/ru-pog-info-test')return probeRuPogAndInfo(res);if(u.pathname==='/api/ru-featureinfo-test')return probeRuFeatureInfo(res);if(u.pathname==='/api/mpzp-info')return mpzpInfo(req.url,res);if(u.pathname==='/api/report-snapshot')return reportSnapshot(req.url,res);if(u.pathname==='/api/rwdz-feature-info')return rwdzFeatureInfo(req.url,res);if(u.pathname==='/api/ru-plan-details-test')return probeRuPlanDetails(res);if(u.pathname==='/api/ru-jsbundle-test')return probeRuJsBundle(res);if(u.pathname==='/api/kiut-styles-test')return probeKiutStyles(res);if(u.pathname==='/api/ru-zoomed-colors-test')return probeRuZoomedColors(res);if(u.pathname==='/api/ru-confirmed-examples-test')return probeRuConfirmedExamples(res);if(u.pathname==='/api/old-gugik-alive-test')return probeOldGugikStillAlive(res);if(u.pathname==='/api/old-kimpzp-featureinfo-test')return probeOldKimpzpFeatureInfo(res);if(u.pathname==='/api/kiut-colors-test')return probeKiutColors(res);if(u.pathname==='/api/emapa-pog-probe')return probeEmapaPog(res);if(u.pathname==='/api/emapa-featureinfo-probe')return probeEmapaFeatureInfo(res);if(u.pathname==='/api/igeoplan-probe')return probeIgeoplan(res);if(u.pathname==='/api/national-wms-probe')return probeNationalWms(res);if(u.pathname==='/api/mpzp-chain-probe')return probeMpzpInfoChain(res);if(u.pathname==='/api/mpzp-gmina-info')return mpzpGminaInfo(req.url,res);if(u.pathname==='/api/dzinfo')return dzinfoInfo(req.url,res);if(u.pathname==='/api/kieg-raw-probe')return probeKiegRaw(res);if(u.pathname==='/api/kieg-gaps-probe')return probeKiegGaps(res);return send(res,404,'application/json; charset=utf-8',JSON.stringify({error:'Not found'}))}catch(e){return send(res,500,'application/json; charset=utf-8',JSON.stringify({error:e.message}))}});
 server.listen(PORT,'0.0.0.0',()=>console.log('MAPA production parcel labels API listening on '+PORT));
