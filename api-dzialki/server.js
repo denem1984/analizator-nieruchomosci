@@ -15,6 +15,7 @@ proj4.defs('EPSG:2180',CRS2180);
 // lokalnych serwerów powiatowych (np. powiat warszawski zachodni)
 // zamiast ogólnopolskiego EPSG:2180.
 proj4.defs('EPSG:2178','+proj=tmerc +lat_0=0 +lon_0=21 +k=0.999923 +x_0=7500000 +y_0=0 +ellps=GRS80 +units=m +no_defs +type=crs');
+function geometryIntersectsBbox4326(geometry,south,west,north,east){let minLon=Infinity,maxLon=-Infinity,minLat=Infinity,maxLat=-Infinity;function visitCoordinates(value){if(!Array.isArray(value))return;if(value.length>=2&&typeof value[0]==='number'&&typeof value[1]==='number'){const[lon,lat]=value;if(Number.isFinite(lon)&&Number.isFinite(lat)){minLon=Math.min(minLon,lon);maxLon=Math.max(maxLon,lon);minLat=Math.min(minLat,lat);maxLat=Math.max(maxLat,lat)}return}for(const child of value)visitCoordinates(child)}function visitGeometry(g){if(!g)return;visitCoordinates(g.coordinates);for(const child of g.geometries||[])visitGeometry(child)}visitGeometry(geometry);if(!Number.isFinite(minLon))return false;const tolerance=0.00002;return maxLon>=west-tolerance&&minLon<=east+tolerance&&maxLat>=south-tolerance&&minLat<=north+tolerance}
 function bboxToCRS(bbox,epsg){const p=String(bbox||'').split(',').slice(0,4).map(Number);if(p.length!==4||p.some(v=>!Number.isFinite(v)))return null;const [south,west,north,east]=p;const corners=[[west,south],[east,south],[east,north],[west,north]].map(ll=>proj4('EPSG:4326',epsg,ll));const xs=corners.map(p=>p[0]),ys=corners.map(p=>p[1]);return{minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)}}
 function send(res,status,type,body){res.writeHead(status,{'Content-Type':type,'Cache-Control':'no-store','Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,OPTIONS'});res.end(body)}
 function bbox2180(bbox){const p=String(bbox||'').split(',').slice(0,4).map(Number);if(p.length!==4||p.some(v=>!Number.isFinite(v)))return null;const [south,west,north,east]=p;const corners=[[west,south],[east,south],[east,north],[west,north]].map(ll=>proj4('EPSG:4326','EPSG:2180',ll));const xs=corners.map(p=>p[0]),ys=corners.map(p=>p[1]);return{minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)}}
@@ -1222,13 +1223,8 @@ async function ownershipNational(reqUrl,res){
 
   function inBounds(data){
     if(!data||!Array.isArray(data.features)||!data.features.length)return false;
-    const f=data.features[0];
-    let c=f&&f.geometry&&f.geometry.coordinates;
-    while(Array.isArray(c)&&Array.isArray(c[0]))c=c[0];
-    if(!Array.isArray(c)||typeof c[0]!=='number'||typeof c[1]!=='number')return false;
-    const[lon,lat]=c;
-    const padLat=Math.max(north-south,0.05),padLon=Math.max(east-west,0.05);
-    return lon>=west-padLon&&lon<=east+padLon&&lat>=south-padLat&&lat<=north+padLat;
+    data.features=data.features.filter(f=>geometryIntersectsBbox4326(f&&f.geometry,south,west,north,east));
+    return data.features.length>0;
   }
 
   async function attempt(bboxStr,axisLabel){
@@ -1262,7 +1258,7 @@ async function ownershipNational(reqUrl,res){
     if(out2.valid)out=out2;
     else if(out2.ok&&!out.ok)out=out2;
   }
-  if(out.ok&&out.data)return send(res,200,'application/json; charset=utf-8',JSON.stringify(out.data));
+  if(out.valid&&out.data)return send(res,200,'application/json; charset=utf-8',JSON.stringify(out.data));
   return send(res,200,'application/json; charset=utf-8',JSON.stringify({type:'FeatureCollection',features:[]}));
 }
 
@@ -1290,13 +1286,8 @@ async function wfs(reqUrl,res){
 
   function inBounds(data){
     if(!data||!Array.isArray(data.features)||!data.features.length)return false;
-    const f=data.features[0];
-    let c=f&&f.geometry&&f.geometry.coordinates;
-    while(Array.isArray(c)&&Array.isArray(c[0]))c=c[0];
-    if(!Array.isArray(c)||typeof c[0]!=='number'||typeof c[1]!=='number')return false;
-    const[lon,lat]=c;
-    const padLat=Math.max(north-south,0.05),padLon=Math.max(east-west,0.05);
-    return lon>=west-padLon&&lon<=east+padLon&&lat>=south-padLat&&lat<=north+padLat;
+    data.features=data.features.filter(f=>geometryIntersectsBbox4326(f&&f.geometry,south,west,north,east));
+    return data.features.length>0;
   }
 
   async function attempt(bboxStr,axisLabel){
@@ -1347,7 +1338,8 @@ async function wfs(reqUrl,res){
     else if(out2.ok&&!out.ok)out=out2;
   }
 
-  if(out.ok&&out.data)return send(res,200,'application/json; charset=utf-8',JSON.stringify(out.data));
+  if(out.valid&&out.data)return send(res,200,'application/json; charset=utf-8',JSON.stringify(out.data));
+  if(out.data&&Array.isArray(out.data.features)&&!out.data.features.length)return send(res,200,'application/json; charset=utf-8',JSON.stringify({type:'FeatureCollection',features:[]}));
   if(out.error)return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:out.error}));
   return send(res,502,'application/json; charset=utf-8',JSON.stringify({error:'WFS nie zwrócił danych GeoJSON/GML.',status:out.status,contentType:out.ct,preview:(out.text||'').slice(0,500)}));
 }
